@@ -52,12 +52,12 @@ int main(int argc, char* argv[])
 }
 ```
 
-This can be compiled by linking against lilbvgio at compile time
+This can be compiled by linking against libvgio at compile time
 ```
-g++ -lvgio <myfile>.cpp
+g++ -lvgio <myprogram>.cpp
 ```
 or with CMake
 ```
 find_package(VGio REQUIRED)
-target_link_libraries(dot2vg VGio::VGio)
+target_link_libraries(myprogram VGio::VGio)
 ```
