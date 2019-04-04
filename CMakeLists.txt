@@ -19,6 +19,7 @@ target_include_directories(vgio
     PUBLIC
         $<INSTALL_INTERFACE:include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}> # Capture the Protobuf generated header that lands here.
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
@@ -44,7 +45,7 @@ install(TARGETS vgio
 set_target_properties(vgio PROPERTIES EXPORT_NAME VGio)
 
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-install(DIRECTORY ${PROTO_HDRS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/vg)
+install(FILES ${PROTO_HDRS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/vg)
 
 # Export the targets to a script
 install(EXPORT vgio-targets

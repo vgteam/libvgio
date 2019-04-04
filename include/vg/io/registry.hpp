@@ -6,13 +6,10 @@
  * Handles bookkeeping for the various data type tags in stream files.
  *
  * TO ADD A PROTOBUF TYPE:
- * - Add a register_protobuf<Type>("TAG");
- * - Call in Registry::register_everything() in registry.cpp
+ * - Add a register_protobuf<Type>("TAG") to Registry::register_everything() in registry.cpp
  * TO ADD A NON-PROTOBUF LOADER/SAVER:
- * - Create a register_loader_saver_whatever.cpp/.hpp defining register_loader_savert_whatever().
- * - Make it call Registry::register_loader_saver<Type>(tag, load_function, save_function)
- * - Call register_loader_saver_whatever() in Registry::register_everything() in registry.cpp
- * TO LOAD/SAVE SOMETHING:
+ * - Write your own static initialization code somewhere that will end up in your binary.
+ * - Make it call Registry::register_loader_saver<Type[, Base[, Base[...]]]>(tag, load_function, save_function)
  */
 
 #include <string>
@@ -24,28 +21,11 @@
 #include <iostream>
 #include <google/protobuf/util/type_resolver.h>
 
-#include "../handle.hpp"
-
 namespace vg {
 
 namespace io {
 
 using namespace std;
-
-// We *want* to use magic registration like we do in the Subcommand system,
-// where you just drop a cpp file in the project and it registers load/save
-// functions for HandleGraph implementations. But that won't work by default,
-// because we're building this stuff into libvg.a, and .o files in the library
-// that aren't actually referenced won't get pulled into the final executable.
-// You would have to use --whole-archive (gcc) or -force_load (clang) to pull
-// them all in. See
-// <https://www.bfilipek.com/2018/02/static-vars-static-lib.html> and
-// <https://stackoverflow.com/questions/805555/ld-linker-question-the-whole-archive-option/842770#842770>.
-
-
-// So all the registration actually happens in registry.cpp. It includes
-// headers for all the things we can load, and calls out manually to register
-// them. Each header defines a register_whatever() function.
 
 // We define some functional-programming-style types to build the type of a
 // loader function.
@@ -132,28 +112,30 @@ public:
     
     /**
      * Register a loading function and a saving function with the given tag
-     * for the given object type.
+     * for the given object type and the given base classes.
      */
-    template<typename Handled>
+    template<typename Handled, typename... Bases>
     static void register_loader_saver(const string& tag, load_function_t loader, save_function_t saver);
     
     /**
      * Register a loading function and a saving function with the given
-     * collection of tags for the given object type. The first tag in the
-     * collection will be used for saving. If "" appears in the list of tags,
-     * the loader can be deployed on untagged message groups (for backward compatibility).
+     * collection of tags for the given object type and list of base classes.
+     * The first tag in the collection will be used for saving. If "" appears
+     * in the list of tags, the loader can be deployed on untagged message
+     * groups (for backward compatibility).
      */
-    template<typename Handled>
+    template<typename Handled, typename... Bases>
     static void register_loader_saver(const vector<string>& tags, load_function_t loader, save_function_t saver);
     
     /**
      * Register a loading function and a saving function with the given tag for
-     * the given object type. The functions operate on bare streams; conversion
-     * to type-tagged messages of chunks of stream data is performed
-     * automatically. The load function will also be registered to load from
-     * non-type-tagged-message-format files, for backward compatibility.
+     * the given object type and list of base classes. The functions operate on
+     * bare streams; conversion to type-tagged messages of chunks of stream
+     * data is performed automatically. The load function will also be
+     * registered to load from non-type-tagged-message-format files, when
+     * trying to load the actual handled type, for backward compatibility.
      */
-    template<typename Handled>
+    template<typename Handled, typename... Bases>
     static void register_bare_loader_saver(const string& tag, bare_load_function_t loader, bare_save_function_t saver);
     
     /**
@@ -251,14 +233,17 @@ private:
     
     /**
      * Register a load function for a tag. The empty tag means it can run on
-     * untagged message groups.
+     * untagged message groups. If any Bases are passed, we will use this
+     * loader to load when one of those types is requested and this tag is
+     * encountered.
      */
-    template<typename Handled>
+    template<typename Handled, typename... Bases>
     static void register_loader(const string& tag, load_function_t loader);
     
     /**
      * Register a load function for loading a type from non-type-tagged-message
-     * "bare" streams.
+     * "bare" streams. Can only work on a single preselected type when loading
+     * from a bare stream.
      */
     template<typename Handled>
     static void register_bare_loader(bare_load_function_t loader);
@@ -292,7 +277,7 @@ void Registry::register_protobuf(const string& tag) {
 #endif
 }
 
-template<typename Handled>
+template<typename Handled, typename... Bases>
 void Registry::register_loader(const string& tag, load_function_t loader) {
     // Limit tag length
     assert(tag.size() <= MAX_TAG_LENGTH);
@@ -303,18 +288,9 @@ void Registry::register_loader(const string& tag, load_function_t loader) {
     // Save the loading function to load the given type
     tables.tag_to_loader[tag][type_index(typeid(Handled))] = loader;
     
-    // Special checks: if the class we got was a HandleGraph implementation, register for the base HandleGraph types.
-    // TODO: Don't copy the loader unnecessarily.
-    
-    if (is_base_of<HandleGraph, Handled>::value) {
-        // It implements HandleGraph, so it can get us a HandleGraph
-        tables.tag_to_loader[tag][type_index(typeid(HandleGraph))] = loader;
-    }
-    
-    if (is_base_of<PathHandleGraph, Handled>::value) {
-        // It implements PathHandleGraph, so it can get us a PathHandleGraph
-        tables.tag_to_loader[tag][type_index(typeid(PathHandleGraph))] = loader;
-    }
+    // And for the base classes.
+    // Expand over all the base types in an initializer list and use an assignment expression to fill a dummy vector.
+    vector<load_function_t> dummy{(tables.tag_to_loader[tag][type_index(typeid(Bases))] = loader)...};
 }
 
 template<typename Handled>
@@ -341,13 +317,13 @@ void Registry::register_saver(const string& tag, save_function_t saver) {
     tables.type_to_saver.emplace(type_index(typeid(Handled)), make_pair(tag, saver));
 }
 
-template<typename Handled>
+template<typename Handled, typename... Bases>
 void Registry::register_loader_saver(const string& tag, load_function_t loader, save_function_t saver) {
     // Dispatch to the vector implementation
-    register_loader_saver<Handled>(vector<string>{tag}, loader, saver);
+    register_loader_saver<Handled, Bases...>(vector<string>{tag}, loader, saver);
 }
 
-template<typename Handled>
+template<typename Handled, typename... Bases>
 void Registry::register_loader_saver(const vector<string>& tags, load_function_t loader, save_function_t saver) {
     // There must be tags
     assert(!tags.empty());
@@ -361,20 +337,20 @@ void Registry::register_loader_saver(const vector<string>& tags, load_function_t
     }
     
     // The first tag gets the loader and saver
-    register_loader<Handled>(tags.front(), loader);
+    register_loader<Handled, Bases...>(tags.front(), loader);
     register_saver<Handled>(tags.front(), saver);
     
     for (size_t i = 1; i < tags.size(); i++) {
         // Other tags just get loaders
-        register_loader<Handled>(tags[i], loader);
+        register_loader<Handled, Bases...>(tags[i], loader);
     }
 }
 
-template<typename Handled>
+template<typename Handled, typename... Bases>
 void Registry::register_bare_loader_saver(const string& tag, bare_load_function_t loader, bare_save_function_t saver) {
 
     // Register the type-tagged wrapped functions
-    register_loader_saver<Handled>(tag, wrap_bare_loader(loader), wrap_bare_saver(saver));
+    register_loader_saver<Handled, Bases...>(tag, wrap_bare_loader(loader), wrap_bare_saver(saver));
     
     // Register the bare stream loader
     register_bare_loader<Handled>(loader);

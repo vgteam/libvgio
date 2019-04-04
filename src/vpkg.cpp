@@ -1,11 +1,9 @@
 /**
- * \file vpkg.cpp: Implementations for VPKG loader functions.
+ * \file vpkg.cpp: Implementations for VPKG loader/saver functions.
  */
 
 
-#include "vpkg.hpp"
-#include <gcsa/gcsa.h>
-#include <gcsa/algorithms.h>
+#include "vg/io/vpkg.hpp"
 
 namespace vg {
 

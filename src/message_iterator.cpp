@@ -3,8 +3,8 @@
  * Implementations for the MessageIterator for reading type-tagged grouped message files
  */
 
-#include "message_iterator.hpp"
-#include "registry.hpp"
+#include "vg/io/message_iterator.hpp"
+#include "vg/io/registry.hpp"
 
 namespace vg {
 

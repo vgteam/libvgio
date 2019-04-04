@@ -17,7 +17,6 @@
 
 #include "message_iterator.hpp"
 #include "registry.hpp"
-#include "../json2pb.h"
 
 namespace vg {
 
@@ -218,7 +217,7 @@ auto ProtobufIterator<T>::fill_value() -> void {
         }
         
 #ifdef debug   
-        cerr << "Got " << pb2json(value) << " from " << message.size() << " bytes" << endl;
+        cerr << "Got message from " << message.size() << " bytes" << endl;
 #endif
     } else {
         // Don't waste space. Clean up any old value.

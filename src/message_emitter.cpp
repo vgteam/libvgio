@@ -3,7 +3,7 @@
  * Implementations for the MessageEmitter.
  */
 
-#include "message_emitter.hpp"
+#include "vg/io/message_emitter.hpp"
 
 namespace vg {
 

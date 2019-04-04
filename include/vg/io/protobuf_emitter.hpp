@@ -17,7 +17,6 @@
 
 #include "message_emitter.hpp"
 #include "registry.hpp"
-#include "../json2pb.h"
 
 namespace vg {
 
@@ -208,7 +207,7 @@ auto ProtobufEmitter<T>::write_copy(const T& item) -> void {
     handle(item.SerializeToString(&encoded));
     
 #ifdef debug
-    cerr << "Write Protobuf: " << pb2json(item) << " to " << encoded.size() << " bytes" << endl;
+    cerr << "Write Protobuf to " << encoded.size() << " bytes" << endl;
 #endif
 
     // Lock the backing emitter

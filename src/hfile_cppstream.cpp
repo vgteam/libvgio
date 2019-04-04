@@ -1,4 +1,4 @@
-#include "hfile_cppstream.hpp"
+#include "vg/io/hfile_cppstream.hpp"
 
 // We need the hFILE* internals available.
 #include <hfile_internal.h>

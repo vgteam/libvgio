@@ -3,8 +3,8 @@
  * Non-template implementations of registry functions.
  */
 
-#include "registry.hpp"
-#include "fdstream.hpp"
+#include "vg/io/registry.hpp"
+#include "vg/io/fdstream.hpp"
 
 #include <google/protobuf/stubs/common.h>
 #include <google/protobuf/descriptor.h>
