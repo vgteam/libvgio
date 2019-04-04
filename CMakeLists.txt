@@ -1,10 +1,12 @@
 cmake_minimum_required(VERSION 3.5)
 project(libvgio VERSION 0.0.0 LANGUAGES CXX)
 
-# Declare dependencies
+# Declare dependencies and explain how to find them
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 find_package(Protobuf REQUIRED)
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
+find_package(HTSlib REQUIRED)
 
 # Create target and set properties
 protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS "deps/vg.proto")
@@ -28,7 +30,7 @@ target_compile_features(vgio PRIVATE cxx_std_11)
 
 target_link_libraries(vgio
     PUBLIC
-        ${Protobuf_LIBRARIES} Threads::Threads
+        ${Protobuf_LIBRARIES} Threads::Threads ${HTSlib_LIBRARIES}
 )
 
 # Installation instructions

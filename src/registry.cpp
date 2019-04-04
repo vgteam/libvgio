@@ -6,6 +6,8 @@
 #include "vg/io/registry.hpp"
 #include "vg/io/fdstream.hpp"
 
+#include "vg.pb.h"
+
 #include <google/protobuf/stubs/common.h>
 #include <google/protobuf/descriptor.h>
 #include <google/protobuf/util/type_resolver.h>

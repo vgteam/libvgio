@@ -1,8 +1,8 @@
 #include "vg/io/blocked_gzip_output_stream.hpp"
 #include "vg/io/hfile_cppstream.hpp"
+#include "vg/io/hfile_internal.hpp"
 
-// We need the hFILE* internals available.
-#include <hfile_internal.h>
+#include <htslib/bgzf.h>
 
 namespace vg {
 

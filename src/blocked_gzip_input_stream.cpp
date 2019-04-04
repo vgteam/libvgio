@@ -1,8 +1,8 @@
 #include "vg/io/blocked_gzip_input_stream.hpp"
 #include "vg/io/hfile_cppstream.hpp"
+#include "vg/io/hfile_internal.hpp"
 
-// We need the hFILE* internals available.
-#include <hfile_internal.h>
+#include <htslib/bgzf.h>
 
 namespace vg {
 
@@ -46,7 +46,7 @@ BlockedGzipInputStream::BlockedGzipInputStream(std::istream& stream) : handle(nu
 }
 
 BlockedGzipInputStream::~BlockedGzipInputStream() {
-    // Close the GBZF
+    // Close the BGZF
     bgzf_close(handle);
 }
 

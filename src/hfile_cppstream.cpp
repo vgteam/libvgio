@@ -1,7 +1,5 @@
 #include "vg/io/hfile_cppstream.hpp"
-
-// We need the hFILE* internals available.
-#include <hfile_internal.h>
+#include "vg/io/hfile_internal.hpp"
 
 #include <errno.h>
 
