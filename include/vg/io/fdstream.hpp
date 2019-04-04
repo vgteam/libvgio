@@ -24,8 +24,8 @@
  *                fdinbuf::underflow(): cast for return statements
  *  Aug 05, 2001: first public version
  */
-#ifndef VG_STREAM_FDSTREAM_HPP_INCLUDED
-#define VG_STREAM_FDSTREAM_HPP_INCLUDED
+#ifndef VG_IO_FDSTREAM_HPP_INCLUDED
+#define VG_IO_FDSTREAM_HPP_INCLUDED
 
 #include <istream>
 #include <ostream>

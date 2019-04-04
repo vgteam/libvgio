@@ -1,5 +1,5 @@
-#ifndef VG_STREAM_VPKG_HPP_INCLUDED
-#define VG_STREAM_VPKG_HPP_INCLUDED
+#ifndef VG_IO_VPKG_HPP_INCLUDED
+#define VG_IO_VPKG_HPP_INCLUDED
 
 /**
  * \file vpkg.hpp: frontend load/save interface for multi-type type-tagged files
