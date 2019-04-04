@@ -7,7 +7,7 @@
 
 namespace vg {
 
-namespace stream {
+namespace io {
 
 using namespace std;
 
@@ -62,7 +62,7 @@ void MessageEmitter::write(const string& tag, string&& message) {
     group.emplace_back(std::move(message));
     
     if (group.back().size() > MAX_MESSAGE_SIZE) {
-        throw std::runtime_error("stream::MessageEmitter::write: message too large");
+        throw std::runtime_error("io::MessageEmitter::write: message too large");
     }
 }
 
@@ -78,7 +78,7 @@ void MessageEmitter::write_copy(const string& tag, const string& message) {
     group.push_back(message);
     
     if (group.back().size() > MAX_MESSAGE_SIZE) {
-        throw std::runtime_error("stream::MessageEmitter::write_copy: message too large");
+        throw std::runtime_error("io::MessageEmitter::write_copy: message too large");
     }
 }
 
@@ -97,7 +97,7 @@ void MessageEmitter::emit_group() {
     
     auto handle = [](bool ok) {
         if (!ok) {
-            throw std::runtime_error("stream::MessageEmitter::emit_group: I/O error writing protobuf");
+            throw std::runtime_error("io::MessageEmitter::emit_group: I/O error writing protobuf");
         }
     };
 

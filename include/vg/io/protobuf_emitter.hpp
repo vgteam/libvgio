@@ -21,7 +21,7 @@
 
 namespace vg {
 
-namespace stream {
+namespace io {
 
 using namespace std;
 
@@ -262,7 +262,7 @@ auto ProtobufEmitter<T>::emit_group() -> void {
 template<typename T>
 auto ProtobufEmitter<T>::handle(bool ok) -> void {
     if (!ok) {
-        throw std::runtime_error("stream::ProtobufEmitter: could not write Protobuf");
+        throw std::runtime_error("io::ProtobufEmitter: could not write Protobuf");
     }
 }
 

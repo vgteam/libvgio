@@ -7,13 +7,13 @@
 
 namespace vg {
 
-namespace stream {
+namespace io {
 
 
 /// Protobuf-style ZeroCopyOutputStream that writes data in blocked gzip
 /// format, and allows interacting with virtual offsets. Does NOT emit the BGZF
 /// end-of-file marker unless told to, because we don't want an empty block
-/// after every vg stream::write call.
+/// after every vg io::write call.
 class BlockedGzipOutputStream : public ::google::protobuf::io::ZeroCopyOutputStream {
 
 public:

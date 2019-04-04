@@ -50,7 +50,7 @@
 
 namespace vg {
 
-namespace stream {
+namespace io {
 
 
 /************************************************************

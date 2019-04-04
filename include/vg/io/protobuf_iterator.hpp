@@ -21,13 +21,13 @@
 
 namespace vg {
 
-namespace stream {
+namespace io {
 
 using namespace std;
 
 
 /**
- * Refactored stream::for_each function that follows the unidirectional iterator interface.
+ * Refactored io::for_each function that follows the unidirectional iterator interface.
  * Also supports seeking and telling at the group level in bgzip files.
  * Cannot be copied, but can be moved.
  */
@@ -206,7 +206,7 @@ auto ProtobufIterator<T>::fill_value() -> void {
         if (!Registry::check_protobuf_tag<T>(tag)) {
             // The registry doesn't think this tag is legit for what we are parsing.
             // Abort!
-            throw runtime_error("[stream::ProtobufIterator] tag \"" + tag +
+            throw runtime_error("[io::ProtobufIterator] tag \"" + tag +
                 "\" for Protobuf that should be \"" + Registry::get_protobuf_tag<T>() + "\"");
                 
             // TODO: Skip over these instead of aborting to allow for multiplexing (i.e. VG in with XG)
@@ -214,7 +214,7 @@ auto ProtobufIterator<T>::fill_value() -> void {
         
         // Parse the value
         if (!value.ParseFromString(message)) {
-            throw runtime_error("[stream::ProtobufIterator] could not parse message");
+            throw runtime_error("[io::ProtobufIterator] could not parse message");
         }
         
 #ifdef debug   

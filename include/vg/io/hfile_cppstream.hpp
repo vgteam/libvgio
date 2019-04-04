@@ -16,7 +16,7 @@
 
 namespace vg {
 
-namespace stream {
+namespace io {
 
 /// Wrap a C++ output stream as an hFILE* that can be written by BGZF
 hFILE* hfile_wrap(std::ostream& output);

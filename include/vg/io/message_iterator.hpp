@@ -20,7 +20,7 @@
 
 namespace vg {
 
-namespace stream {
+namespace io {
 
 using namespace std;
 

@@ -10,7 +10,7 @@
 
 namespace vg {
 
-namespace stream {
+namespace io {
 
 void register_loader_saver_minimizer() {
     Registry::register_bare_loader_saver<MinimizerIndex>("MinimizerIndex", [](istream& input) -> void* {

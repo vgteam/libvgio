@@ -10,7 +10,7 @@
 
 namespace vg {
 
-namespace stream {
+namespace io {
 
 // It's handy to be able to stream in JSON via vg view for testing.
 // This helper class takes this functionality from vg view -J and
@@ -103,7 +103,7 @@ inline int64_t JSONStreamHelper<T>::write(std::ostream& out, bool json_out,
         }
         if (!good || buf.size() >= buf_size) {
             if (!json_out) {
-                stream::write(out, buf.size(), lambda);
+                io::write(out, buf.size(), lambda);
             } else {
                 for (int i = 0; i < buf.size(); ++i) {
                     out << pb2json(buf[i]);
@@ -115,7 +115,7 @@ inline int64_t JSONStreamHelper<T>::write(std::ostream& out, bool json_out,
     }
     
     if (!json_out) {
-        stream::finish(out);
+        io::finish(out);
     }
     
     out.flush();

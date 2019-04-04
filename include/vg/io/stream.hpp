@@ -19,7 +19,7 @@
 
 namespace vg {
 
-namespace stream {
+namespace io {
 
 using namespace std;
 
@@ -131,7 +131,7 @@ void for_each_parallel_impl(std::istream& in,
     // objects will be handed off to worker threads in batches of this many
     // Must be divisible by 2.
     const size_t batch_size = 256;
-    static_assert(batch_size % 2 == 0, "stream::for_each_parallel::batch_size must be even");
+    static_assert(batch_size % 2 == 0, "io::for_each_parallel::batch_size must be even");
     // max # of such batches to be holding in memory
     size_t max_batches_outstanding = 256;
     // max # we will ever increase the batch buffer to
@@ -278,7 +278,7 @@ template <typename T>
 void for_each_interleaved_pair_parallel(std::istream& in,
                                         const std::function<void(T&,T&)>& lambda2) {
     std::function<void(T&)> err1 = [](T&){
-        throw std::runtime_error("stream::for_each_interleaved_pair_parallel: expected input stream of interleaved pairs, but it had odd number of elements");
+        throw std::runtime_error("io::for_each_interleaved_pair_parallel: expected input stream of interleaved pairs, but it had odd number of elements");
     };
     std::function<bool(void)> no_wait = [](void) {return true;};
     for_each_parallel_impl(in, lambda2, err1, no_wait);
@@ -289,7 +289,7 @@ void for_each_interleaved_pair_parallel_after_wait(std::istream& in,
                                                    const std::function<void(T&,T&)>& lambda2,
                                                    const std::function<bool(void)>& single_threaded_until_true) {
     std::function<void(T&)> err1 = [](T&){
-        throw std::runtime_error("stream::for_each_interleaved_pair_parallel: expected input stream of interleaved pairs, but it had odd number of elements");
+        throw std::runtime_error("io::for_each_interleaved_pair_parallel: expected input stream of interleaved pairs, but it had odd number of elements");
     };
     for_each_parallel_impl(in, lambda2, err1, single_threaded_until_true);
 }

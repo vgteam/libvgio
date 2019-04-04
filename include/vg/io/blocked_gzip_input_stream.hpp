@@ -7,7 +7,7 @@
 
 namespace vg {
 
-namespace stream {
+namespace io {
 
 
 /// Protobuf-style ZeroCopyInputStream that reads data from blocked gzip
