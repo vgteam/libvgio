@@ -4,9 +4,10 @@
 #include <iostream>  // cout
 #include <string>
 // local
-#include "stream.hpp"
-#include "vg/vg.pb.h"  // vg::*
 #include "vg/io/basic_stream.hpp"
+#include "vg/io/stream.hpp"
+
+
 
 using std::cout;
 using std::function;
