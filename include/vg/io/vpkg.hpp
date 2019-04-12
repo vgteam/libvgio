@@ -13,6 +13,7 @@
 #include <tuple>
 #include <vector>
 #include <deque>
+#include <memory>
 
 // We use this for fancy type-name demangling. Hopefully the compiler has it.
 #include <cxxabi.h>
