@@ -45,7 +45,7 @@ target_include_directories(vgio_objs
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-target_compile_features(vgio_objs PRIVATE cxx_std_11)
+target_compile_features(vgio_objs PRIVATE cxx_std_14)
 
 # We need to repeat these linking rules for both shared and static because they don't propagate from the object library.
 # But we need to carry through transitive library dependencies in static mode.
