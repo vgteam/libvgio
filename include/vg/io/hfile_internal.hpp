@@ -8,6 +8,8 @@
  * Can be deleted when https://github.com/samtools/htslib/issues/849 is fixed.
  */
  
+extern "C" {
+ 
 struct hFILE;
  
 struct hFILE_backend {
@@ -19,5 +21,7 @@ struct hFILE_backend {
 };
 
 hFILE* hfile_init(size_t, const char*, size_t);
+
+}
 
 #endif
