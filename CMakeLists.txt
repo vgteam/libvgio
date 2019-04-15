@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.9)
 project(libvgio VERSION 0.0.0 LANGUAGES CXX)
 
 # Declare dependencies and explain how to find them
