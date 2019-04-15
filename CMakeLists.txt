@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.13)
+cmake_minimum_required(VERSION 3.10)
 project(libvgio VERSION 0.0.0 LANGUAGES CXX)
 
 # Declare dependencies and explain how to find them
@@ -16,6 +16,14 @@ find_package(Threads REQUIRED)
 
 # Find HTSlib. We find it with pkg-config, so it has static and dynamic libs by default.
 pkg_check_modules(HTSlib REQUIRED htslib)
+
+# Set link directories. we can't use target_link_directories to keep these
+# straight between static and dynamic libraries since it's not available until
+# cmake 3.13, which isn't out in distros yet.
+link_directories(
+    ${Protobuf_LIBRARY_DIRS} ${HTSlib_LIBRARY_DIRS}
+    ${Protobuf_STATIC_LIBRARY_DIRS} ${HTSlib_STATIC_LIBRARY_DIRS}
+)
 
 # Make Protobuf headers and code
 protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS "deps/vg.proto")
@@ -54,19 +62,10 @@ target_link_libraries(vgio
     PUBLIC
         ${Protobuf_LIBRARIES} Threads::Threads ${HTSlib_LIBRARIES}
 )
-target_link_directories(vgio
-    PUBLIC
-        ${Protobuf_LIBRARY_DIRS} ${HTSlib_LIBRARY_DIRS}
-)
 target_link_libraries(vgio_static
     PUBLIC
         ${Protobuf_STATIC_LIBRARIES} Threads::Threads ${HTSlib_STATIC_LIBRARIES}
 )
-target_link_directories(vgio_static
-    PUBLIC
-        ${Protobuf_STATIC_LIBRARY_DIRS} ${HTSlib_STATIC_LIBRARY_DIRS}
-)
-
 
 # Installation instructions
 
