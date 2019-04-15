@@ -75,6 +75,7 @@ set(INSTALL_CONFIGDIR ${CMAKE_INSTALL_LIBDIR}/cmake/VGio)
 install(TARGETS vgio vgio_static
     EXPORT vgio-targets
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 
 # Make the exported targets have the name VGio and not vgio
