@@ -25,6 +25,11 @@ link_directories(
     ${Protobuf_STATIC_LIBRARY_DIRS} ${HTSlib_STATIC_LIBRARY_DIRS}
 )
 
+# Set where the LC_ID_DYLIB install name for Mac dylib files ought to point.
+# It ought to point to where the dylibs will actually be installed
+# Only takes effect after installation
+set(CMAKE_INSTALL_NAME_DIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
+
 # Make Protobuf headers and code
 protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS "deps/vg.proto")
 
