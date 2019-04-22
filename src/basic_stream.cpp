@@ -75,7 +75,7 @@ void outputStream(const Graph& g)
   function<Graph(uint64_t)> lambda = [&g](uint64_t i) -> Graph {
     return g;
   };
-  write(cout, 1, lambda);
+  write<Graph>(cout, 1, lambda);
 }
 
 } // io
