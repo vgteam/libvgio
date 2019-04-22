@@ -33,12 +33,22 @@ set(CMAKE_INSTALL_NAME_DIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
 # Make Protobuf headers and code
 protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS "deps/vg.proto")
 
+# The Protobuf compiler dumps the vg.pb.h file in the root directory.
+# But we need to have it in somewhere accessible as <vg/vg.pb.h>
+# because that's where our code will want it to be after installation.
+# So hook it up with a symlink. See <https://stackoverflow.com/a/35765320>
+add_custom_target(link_target ALL
+    COMMAND ${CMAKE_COMMAND} -E create_symlink . vg)
+
 # Find all the CPP files
 file(GLOB SOURCES "src/**.cpp")
 
 # Define an object library to build them into
 add_library(vgio_objs OBJECT ${PROTO_SRCS} ${SOURCES})
 set_property(TARGET vgio_objs PROPERTY POSITION_INDEPENDENT_CODE 1)
+
+# Don't build any object files until the Protobuf include symlink is set up
+add_dependencies(vgio_objs link_target)
 
 # Build that into both shared and static libraies, with shared as the main one
 add_library(vgio SHARED $<TARGET_OBJECTS:vgio_objs>)
