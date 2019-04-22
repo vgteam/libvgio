@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.9)
 project(libvgio VERSION 0.0.0 LANGUAGES CXX)
 
+# Optimize by default, but also include debug info
+set(CMAKE_CXX_FLAGS "-O3 -g")
+
 # Declare dependencies and explain how to find them
 find_package(PkgConfig REQUIRED)
 
