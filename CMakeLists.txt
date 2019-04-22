@@ -43,23 +43,31 @@ add_custom_target(link_target ALL
 # Find all the CPP files
 file(GLOB SOURCES "src/**.cpp")
 
-# Define an object library to build them into
-add_library(vgio_objs OBJECT ${PROTO_SRCS} ${SOURCES})
-set_property(TARGET vgio_objs PROPERTY POSITION_INDEPENDENT_CODE 1)
+# Build that into both shared and static libraies, with shared as the main one.
+# Don't use an object library because we want the static library to be position-dependent code.
+add_library(vgio SHARED ${PROTO_SRCS} ${SOURCES})
+set_property(TARGET vgio PROPERTY POSITION_INDEPENDENT_CODE ON)
+add_library(vgio_static STATIC ${PROTO_SRCS} ${SOURCES})
+set_target_properties(vgio_static PROPERTIES OUTPUT_NAME vgio)
+set_property(TARGET vgio_static PROPERTY POSITION_INDEPENDENT_CODE OFF)
 
 # Don't build any object files until the Protobuf include symlink is set up
-add_dependencies(vgio_objs link_target)
-
-# Build that into both shared and static libraies, with shared as the main one
-add_library(vgio SHARED $<TARGET_OBJECTS:vgio_objs>)
-add_library(vgio_static STATIC $<TARGET_OBJECTS:vgio_objs>)
-set_target_properties(vgio_static PROPERTIES OUTPUT_NAME vgio)
+add_dependencies(vgio link_target)
+add_dependencies(vgio_static link_target)
 
 # Add an alias so that library can be used inside the build tree, e.g. when testing
 add_library(VGio::vgio ALIAS vgio)
 
 # Set target properties
-target_include_directories(vgio_objs
+target_include_directories(vgio
+    PUBLIC
+        $<INSTALL_INTERFACE:include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}> # Capture the Protobuf generated header that lands here.
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_include_directories(vgio_static
     PUBLIC
         $<INSTALL_INTERFACE:include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -68,7 +76,8 @@ target_include_directories(vgio_objs
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-target_compile_features(vgio_objs PRIVATE cxx_std_14)
+target_compile_features(vgio PUBLIC cxx_std_14)
+target_compile_features(vgio_static PUBLIC cxx_std_14)
 
 # We need to repeat these linking rules for both shared and static because they don't propagate from the object library.
 # But we need to carry through transitive library dependencies in static mode.
