@@ -2,7 +2,7 @@
 #define VG_IO_BASIC_STREAM_HPP
 
 #include <string>
-#include "vg.pb.h"
+#include <vg/vg.pb.h>
 
 namespace vg {
 namespace io {

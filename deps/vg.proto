@@ -125,7 +125,7 @@ message Alignment {
     double identity = 16; // Portion of aligned bases that are perfect matches, or 0 if no bases are aligned.
     repeated Path fragment = 17; // An estimate of the length of the fragment, if this Alignment is paired.
     repeated Locus locus = 18; // The loci that this alignment supports. TODO: get rid of this, we have annotations in our data model again.
-    repeated Position refpos = 19; // Position of the alignment in reference paths embedded in graph
+    repeated Position refpos = 19; // Position of the alignment in reference paths embedded in graph. Each position has a path name, and the Alignment's minimum position along the path as an offset.
     
     // SAMTools-style flags
     bool read_paired = 20;

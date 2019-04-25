@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.9)
 project(libvgio VERSION 0.0.0 LANGUAGES CXX)
 
+# Optimize by default, but also include debug info
+set(CMAKE_CXX_FLAGS "-O3 -g")
+
 # Declare dependencies and explain how to find them
 find_package(PkgConfig REQUIRED)
 
@@ -25,26 +28,49 @@ link_directories(
     ${Protobuf_STATIC_LIBRARY_DIRS} ${HTSlib_STATIC_LIBRARY_DIRS}
 )
 
+# Set where the LC_ID_DYLIB install name for Mac dylib files ought to point.
+# It ought to point to where the dylibs will actually be installed
+# Only takes effect after installation
+set(CMAKE_INSTALL_NAME_DIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
+
 # Make Protobuf headers and code
 protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS "deps/vg.proto")
+
+# The Protobuf compiler dumps the vg.pb.h file in the root directory.
+# But we need to have it in somewhere accessible as <vg/vg.pb.h>
+# because that's where our code will want it to be after installation.
+# So hook it up with a symlink. See <https://stackoverflow.com/a/35765320>
+add_custom_target(link_target ALL
+    COMMAND ${CMAKE_COMMAND} -E create_symlink . vg)
 
 # Find all the CPP files
 file(GLOB SOURCES "src/**.cpp")
 
-# Define an object library to build them into
-add_library(vgio_objs OBJECT ${PROTO_SRCS} ${SOURCES})
-set_property(TARGET vgio_objs PROPERTY POSITION_INDEPENDENT_CODE 1)
-
-# Build that into both shared and static libraies, with shared as the main one
-add_library(vgio SHARED $<TARGET_OBJECTS:vgio_objs>)
-add_library(vgio_static STATIC $<TARGET_OBJECTS:vgio_objs>)
+# Build that into both shared and static libraies, with shared as the main one.
+# Don't use an object library because we want the static library to be position-dependent code.
+add_library(vgio SHARED ${PROTO_SRCS} ${SOURCES})
+set_property(TARGET vgio PROPERTY POSITION_INDEPENDENT_CODE ON)
+add_library(vgio_static STATIC ${PROTO_SRCS} ${SOURCES})
 set_target_properties(vgio_static PROPERTIES OUTPUT_NAME vgio)
+set_property(TARGET vgio_static PROPERTY POSITION_INDEPENDENT_CODE OFF)
+
+# Don't build any object files until the Protobuf include symlink is set up
+add_dependencies(vgio link_target)
+add_dependencies(vgio_static link_target)
 
 # Add an alias so that library can be used inside the build tree, e.g. when testing
 add_library(VGio::vgio ALIAS vgio)
 
 # Set target properties
-target_include_directories(vgio_objs
+target_include_directories(vgio
+    PUBLIC
+        $<INSTALL_INTERFACE:include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}> # Capture the Protobuf generated header that lands here.
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_include_directories(vgio_static
     PUBLIC
         $<INSTALL_INTERFACE:include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -53,7 +79,8 @@ target_include_directories(vgio_objs
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-target_compile_features(vgio_objs PRIVATE cxx_std_14)
+target_compile_features(vgio PUBLIC cxx_std_14)
+target_compile_features(vgio_static PUBLIC cxx_std_14)
 
 # We need to repeat these linking rules for both shared and static because they don't propagate from the object library.
 # But we need to carry through transitive library dependencies in static mode.
