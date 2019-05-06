@@ -39,7 +39,7 @@ class MessageIterator {
 public:
 
     /// We refuse to serialize individual messages longer than this size.
-    const size_t MAX_MESSAGE_SIZE = 1000000000;
+    const static size_t MAX_MESSAGE_SIZE = 1000000000;
 
     /// Constructor to wrap a stream.
     MessageIterator(istream& in);
