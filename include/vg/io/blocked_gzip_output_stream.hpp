@@ -2,8 +2,9 @@
 #define VG_BLOCKED_GZIP_OUTPUT_STREAM_HPP_INCLUDED
 
 #include <google/protobuf/io/zero_copy_stream.h>
-
 #include <htslib/bgzf.h>
+#include <iostream>
+#include <vector>
 
 namespace vg {
 
