@@ -12,6 +12,9 @@ namespace io {
 
 using namespace std;
 
+// Provide the static values a compilation unit to live in.
+const size_t MessageIterator::MAX_MESSAGE_SIZE;
+
 MessageIterator::MessageIterator(istream& in) : MessageIterator(unique_ptr<BlockedGzipInputStream>(new BlockedGzipInputStream(in))) {
     // Nothing to do!
 }
