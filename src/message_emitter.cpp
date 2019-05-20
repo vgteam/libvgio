@@ -20,7 +20,7 @@ MessageEmitter::MessageEmitter(ostream& out, size_t max_group_size) :
     cerr << "Creating MessageEmitter" << endl;
 #endif
     if (bgzip_out->Tell() == -1) {
-        // Say we are starting at the beginnign of the stream, if we don't know where we are.
+        // Say we are starting at the beginning of the stream, if we don't know where we are.
         bgzip_out->StartFile();
     }
 }
