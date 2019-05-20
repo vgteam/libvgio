@@ -205,8 +205,8 @@ public:
             // If we get here, nothing with an appropriate tag could be found, and it wasn't a bare loadable file.
             return unique_ptr<Wanted>(nullptr);
         } else {
-            // If the file is empty, default construct.
-            return make_unique<Wanted>();
+            // If the file is empty, default construct if possible. Else return null.
+            return make_default_or_null<Wanted>();
         }
     }
     
@@ -482,6 +482,28 @@ private:
         }
         
         return demangled;
+    }
+    
+    /**
+     * Return a new default-constructed instance of the given type, or a null
+     * pointer if it is not default constructible.
+     *
+     * This version matches default-consttructable types.
+     */
+    template <typename T>
+    typename std::enable_if<std::is_default_constructible<T>::value, unique_ptr<T>>::type make_default_or_null() {
+        return make_unique<T>();
+    }
+    
+    /**
+     * Return a new default-constructed instance of the given type, or a null
+     * pointer if it is not default constructible.
+     *
+     * This version matches non-default-consttructable types.
+     */
+    template <typename T>
+    typename std::enable_if<!std::is_default_constructible<T>::value, unique_ptr<T>>::type make_default_or_null() {
+        return unique_ptr<T>(nullptr);
     }
 };
 
