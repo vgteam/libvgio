@@ -491,7 +491,7 @@ private:
      * This version matches default-consttructable types.
      */
     template <typename T>
-    typename std::enable_if<std::is_default_constructible<T>::value, unique_ptr<T>>::type make_default_or_null() {
+    static typename std::enable_if<std::is_default_constructible<T>::value, unique_ptr<T>>::type make_default_or_null() {
         return make_unique<T>();
     }
     
@@ -502,7 +502,7 @@ private:
      * This version matches non-default-consttructable types.
      */
     template <typename T>
-    typename std::enable_if<!std::is_default_constructible<T>::value, unique_ptr<T>>::type make_default_or_null() {
+    static typename std::enable_if<!std::is_default_constructible<T>::value, unique_ptr<T>>::type make_default_or_null() {
         return unique_ptr<T>(nullptr);
     }
 };
