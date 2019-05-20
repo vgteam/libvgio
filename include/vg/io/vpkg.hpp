@@ -334,7 +334,7 @@ public:
         MessageEmitter emitter(out);
         
         // Mark that we serialized something with this tag, even if there aren't actually any messages.
-        message_emitter.write(tag_and_saver->first);
+        emitter.write(tag_and_saver->first);
         
         // Start the save
         tag_and_saver->second((const void*)&have, [&](const string& message) {
