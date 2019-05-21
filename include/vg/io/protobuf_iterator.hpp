@@ -68,15 +68,15 @@ public:
     static pair<ProtobufIterator<T>, ProtobufIterator<T>> range(istream& in);
     
     ///////////
-    // has_next()/take() interface
+    // has_current()/take() interface
     ///////////
     
     /// Return true if dereferencing the iterator will produce a valid value, and false otherwise.
-    bool has_next() const;
+    bool has_current() const;
     
     /// Advance the iterator to the next message, or the end if this was the last message.
     /// Basically the same as ++.
-    void get_next();
+    void advance();
     
     /// Take the current item, which must exist, and advance the iterator to the next one.
     T take();
@@ -93,9 +93,10 @@ public:
     int64_t tell_group() const;
     
     /// Seek to the given virtual offset and start reading the group that is there.
-    /// The next value produced will be the first value in that group.
-    /// If already at the start of the group at the given virtual offset, does nothing.
-    /// Return false if seeking is unsupported or the seek fails.
+    /// The next value produced will be the first value in that group (or in
+    /// the next group that actually has values). If already at the start of
+    /// the group at the given virtual offset, does nothing. Return false if
+    /// seeking is unsupported or the seek fails.
     bool seek_group(int64_t virtual_offset);
     
 private:
@@ -107,6 +108,7 @@ private:
     T value;
     
     /// Fill in value, if message_it has a value of an appropriate tag.
+    /// Scans through tag-only groups.
     void fill_value();
 };
 
@@ -153,19 +155,19 @@ auto ProtobufIterator<T>::range(istream& in) -> pair<ProtobufIterator<T>, Protob
 }
 
 template<typename T>
-auto ProtobufIterator<T>::has_next() const -> bool {
-    return message_it.has_next();
+auto ProtobufIterator<T>::has_current() const -> bool {
+    return message_it.has_current();
 }
 
 template<typename T>
-auto ProtobufIterator<T>::get_next() -> void {
+auto ProtobufIterator<T>::advance() -> void {
     ++(*this);
 }
 
 template<typename T>
 auto ProtobufIterator<T>::take() -> T {
     auto temp = std::move(value);
-    get_next();
+    advance();
     // Return by value, which gets moved.
     return temp;
 }
@@ -194,7 +196,7 @@ auto ProtobufIterator<T>::fill_value() -> void {
     cerr << "Fill Protobuf value" << endl;
 #endif
     
-    if (message_it.has_next()) {
+    while (message_it.has_current()) {
         // Grab the tag and message
         auto& tag_and_message = *message_it;
         auto& tag = tag_and_message.first;
@@ -211,18 +213,27 @@ auto ProtobufIterator<T>::fill_value() -> void {
             // TODO: Skip over these instead of aborting to allow for multiplexing (i.e. VG in with XG)
         }
         
+        if (message.get() == nullptr) {
+            // This is a tag-only group. Skip over it.
+            message_it.advance();
+            continue;
+        }
+        
         // Parse the value
-        if (!value.ParseFromString(message)) {
+        if (!value.ParseFromString(*message)) {
             throw runtime_error("[io::ProtobufIterator] could not parse message");
         }
         
 #ifdef debug   
-        cerr << "Got message from " << message.size() << " bytes" << endl;
+        cerr << "Got message from " << message->size() << " bytes" << endl;
 #endif
-    } else {
-        // Don't waste space. Clean up any old value.
-        value.Clear();
+
+        // Now the value is parsed. Don't clear it out.
+        return;
     }
+    
+    // If we can't find anything, don't waste space. Clean up any old value.
+    value.Clear();
 }
 
 

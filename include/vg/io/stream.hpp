@@ -101,7 +101,7 @@ template <typename T>
 void for_each(std::istream& in,
               const std::function<void(int64_t, T&)>& lambda) {
     
-    for(ProtobufIterator<T> it(in); it.has_next(); ++it) {
+    for(ProtobufIterator<T> it(in); it.has_current(); ++it) {
         // For each message in the file, parse and process it with its group VO (or -1)
         lambda(it.tell_group(), *it);
     }
@@ -157,7 +157,7 @@ void for_each_parallel_impl(std::istream& in,
 
         std::vector<std::string> *batch = nullptr;
         
-        while (message_it.has_next()) {
+        while (message_it.has_current()) {
             // Until we run out of messages, grab them with their tags
             auto tag_and_data = std::move(message_it.take());
             
@@ -172,8 +172,10 @@ void for_each_parallel_impl(std::istream& in,
                 batch = new vector<string>();
             }
             
-            // Add the message to the batch
-            batch->push_back(std::move(tag_and_data.second));
+            if (tag_and_data.second.get() != nullptr) {
+                // Add the message to the batch, if it exists
+                batch->push_back(std::move(*tag_and_data.second));
+            }
             
             if (batch->size() == batch_size) {
 #ifdef debug

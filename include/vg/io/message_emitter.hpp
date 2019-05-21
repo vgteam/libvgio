@@ -36,7 +36,7 @@ using namespace std;
  * - A 64-bit varint with the number of messages plus 1
  * - A 32-bit varint header/tag length
  * - Header/tag data
- * And then for each message item:
+ * And then for each message item (0 or more):
  * - A 32-bit varint message length
  * - Message data
  *

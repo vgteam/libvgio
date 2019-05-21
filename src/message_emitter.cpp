@@ -11,6 +11,8 @@ namespace io {
 
 using namespace std;
 
+#define debug
+
 MessageEmitter::MessageEmitter(ostream& out, size_t max_group_size) :
     group(),
     max_group_size(max_group_size),
@@ -58,6 +60,9 @@ void MessageEmitter::write(const string& tag) {
     if (tag != group_tag) {
         // Adopt the new tag
         group_tag = tag;
+#ifdef debug
+        cerr << "Adopting tag " << group_tag << endl;
+#endif
     }
 }
 
@@ -107,9 +112,17 @@ void MessageEmitter::emit_group() {
 
     ::google::protobuf::io::CodedOutputStream coded_out(bgzip_out.get());
 
+#ifdef debug
+    cerr << "Writing group size of " << (group.size() + 1) << endl;
+#endif
+
     // Prefix the group with the number of objects, plus 1 for the tag header
     coded_out.WriteVarint64(group.size() + 1);
     handle(!coded_out.HadError());
+   
+#ifdef debug
+    cerr << "Writing tag " << group_tag << endl;
+#endif
    
     // Write the tag length and the tag
     coded_out.WriteVarint32(group_tag.size());
