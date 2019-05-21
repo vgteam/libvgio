@@ -3,6 +3,7 @@
 #include "vg/io/hfile_internal.hpp"
 
 #include <htslib/bgzf.h>
+#include <iostream>
 
 namespace vg {
 
@@ -245,8 +246,8 @@ bool BlockedGzipInputStream::Seek(int64_t virtual_offset) {
         // The seek failed
         // Error info is in handle->errcode and handle->fp->has_errno
         // Log the error
-        cerr << "error[vg::BlockedGzipInputStream]: BGZF seek error: errcode: "
-            << handle->errcode << " errno: " << handle->fp->has_errno << endl;
+        std::cerr << "error[vg::BlockedGzipInputStream]: BGZF seek error: errcode: "
+                  << handle->errcode << " errno: " << handle->fp->has_errno << std::endl;
         return false;
     }
     

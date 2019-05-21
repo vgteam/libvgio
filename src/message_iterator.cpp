@@ -12,6 +12,9 @@ namespace io {
 
 using namespace std;
 
+// Provide the static values a compilation unit to live in.
+const size_t MessageIterator::MAX_MESSAGE_SIZE;
+
 MessageIterator::MessageIterator(istream& in) : MessageIterator(unique_ptr<BlockedGzipInputStream>(new BlockedGzipInputStream(in))) {
     // Nothing to do!
 }
@@ -61,7 +64,7 @@ auto MessageIterator::operator++() -> const MessageIterator& {
         // Make a CodedInputStream to read the group length
         ::google::protobuf::io::CodedInputStream coded_in(bgzip_in.get());
         // Alot space for group's length, tag's length, and tag (generously)
-        coded_in.SetTotalBytesLimit(MAX_MESSAGE_SIZE * 2);
+        coded_in.SetTotalBytesLimit(MAX_MESSAGE_SIZE * 2, MAX_MESSAGE_SIZE * 10);
         
         // Try and read the group's length
         if (!coded_in.ReadVarint64((::google::protobuf::uint64*) &group_count)) {

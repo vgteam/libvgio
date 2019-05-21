@@ -15,6 +15,9 @@
 #include <functional>
 #include <vector>
 
+#include <google/protobuf/io/coded_stream.h>
+#include <google/protobuf/io/zero_copy_stream_impl_lite.h>
+
 #include "message_iterator.hpp"
 #include "registry.hpp"
 
@@ -218,9 +221,27 @@ auto ProtobufIterator<T>::fill_value() -> void {
             message_it.advance();
             continue;
         }
+
+        // Parse the value.
         
-        // Parse the value
-        if (!value.ParseFromString(*message)) {
+        // We can't use ParseFromString because we need to be able to read
+        // messages of size up to MessageIterator::MAX_MESSAGE_SIZE bytes (or
+        // thereabouts), which is much larger than Protobuf's default 64 MB
+        // CodedInputStream limit. With ParseFromString we can't get at the
+        // CodedInputStream to tinker with it. See
+        // <https://stackoverflow.com/a/35172491>
+       
+        // Make an ArrayInputStream over the string data
+        google::protobuf::io::ArrayInputStream array_stream(message.c_str(), message.size());
+        
+        // Make a CodedInputStream to decode form it
+        google::protobuf::io::CodedInputStream coded_stream(&array_stream);
+        
+        // Up the total byte limit
+        coded_stream.SetTotalBytesLimit(MessageIterator::MAX_MESSAGE_SIZE * 2, MessageIterator::MAX_MESSAGE_SIZE * 2);
+        
+        // Now actually parse the message
+        if (!value.ParseFromCodedStream(&coded_stream)) {
             throw runtime_error("[io::ProtobufIterator] could not parse message");
         }
         
