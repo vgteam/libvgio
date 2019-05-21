@@ -49,7 +49,8 @@ public:
     
     /// Represents a pair of a tag value and some message data.
     /// If there is no valid tag for a group, as given in the Registry, the tag will be "".
-    using TaggedMessage = pair<string, string>;
+    /// If there is a tag but no messages in its group, the data pointer will be null.
+    using TaggedMessage = pair<string, unique_ptr<string>>;
     
     ///////////
     // C++ Iterator Interface
@@ -83,15 +84,15 @@ public:
     static std::pair<MessageIterator, MessageIterator> range(istream& in);
     
     ///////////
-    // has_next()/take() interface
+    // has_current()/take() interface
     ///////////
     
     /// Return true if dereferencing the iterator will produce a valid value, and false otherwise.
-    bool has_next() const;
+    bool has_current() const;
     
     /// Advance the iterator to the next message, or the end if this was the last message.
     /// Basically the same as ++.
-    void get_next();
+    void advance();
     
     /// Take the current item, which must exist, and advance the iterator to the next one.
     TaggedMessage take();

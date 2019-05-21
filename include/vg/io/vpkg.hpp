@@ -88,7 +88,7 @@ public:
             if (keep_going && skip_tag) {
                 // Nobody made progress, so skip all messages tagged with the current tag
                 string to_skip = (*it).first;
-                while (it.has_next() && (*it).first == to_skip) {
+                while (it.has_current() && (*it).first == to_skip) {
                     ++it;
                 }
             }
@@ -164,13 +164,13 @@ public:
         MessageIterator it(in);
         
 #ifdef debug
-        cerr << "Iterator has a first item? " << it.has_next() << endl;
+        cerr << "Iterator has a first item? " << it.has_current() << endl;
 #endif
         
-        if (it.has_next()) {
+        if (it.has_current()) {
             // File is not empty
         
-            while (it.has_next()) {
+            while (it.has_current()) {
                 // Scan through kinds of tagged messages
                 string current_tag = (*it).first;
                 
@@ -187,15 +187,17 @@ public:
                 
                 if (loader == nullptr) {
                     // Skip all these messages with this tag
-                    while (it.has_next() && (*it).first == current_tag) {
+                    while (it.has_current() && (*it).first == current_tag) {
                         ++it;
                     }
                 } else {
                     // Load with it and return a unique_ptr for the result.
                     return unique_ptr<Wanted>((Wanted*)(*loader)([&](const message_consumer_function_t& handle_message) {
-                        while (it.has_next() && (*it).first == current_tag) {
+                        while (it.has_current() && (*it).first == current_tag) {
                             // Feed in messages from the file until we run out or the tag changes
-                            handle_message((*it).second);
+                            if ((*it).second.get() != nullptr) {
+                                handle_message(*((*it).second));
+                            }
                             ++it;
                         }
                     }));
@@ -205,8 +207,8 @@ public:
             // If we get here, nothing with an appropriate tag could be found, and it wasn't a bare loadable file.
             return unique_ptr<Wanted>(nullptr);
         } else {
-            // If the file is empty, default construct.
-            return make_unique<Wanted>();
+            // If the file is empty, default construct if possible. Else return null.
+            return make_default_or_null<Wanted>();
         }
     }
     
@@ -325,6 +327,10 @@ public:
         // We shouldn't ever be saving something we don't know how to save.
         assert(tag_and_saver != nullptr);
         
+#ifdef debug
+        cerr << "Saving " << describe<Have>() << " to stream with tag " << tag_and_saver->first << endl;
+#endif
+        
         if (!out) {
             cerr << "error[VPKG::save]: Could not write to stream while saving " << describe<Have>() << endl;
             exit(1);
@@ -332,6 +338,9 @@ public:
         
         // Make an emitter to emit tagged messages
         MessageEmitter emitter(out);
+        
+        // Mark that we serialized something with this tag, even if there aren't actually any messages.
+        emitter.write(tag_and_saver->first);
         
         // Start the save
         tag_and_saver->second((const void*)&have, [&](const string& message) {
@@ -423,7 +432,7 @@ private:
             return LOAD_FINISHED;
         }
         
-        if (!it.has_next()) {
+        if (!it.has_current()) {
             // If there's nothing to look at, we're done
             return LOAD_FINISHED;
         }
@@ -441,9 +450,14 @@ private:
         
         // Otherwise we can load, so do it.
         slot = (*loader)([&](const message_consumer_function_t& handle_message) {
-            while (it.has_next() && (*it).first == tag_to_load) {
+            while (it.has_current() && (*it).first == tag_to_load) {
                 // Feed in messages from the file until we run out or the tag changes
-                handle_message((*it).second);
+                auto& message = (*it).second;
+                if (message.get() != nullptr) {
+                    // Handle all the messages that actually exist.
+                    // Just scan through tag-only groups.
+                    handle_message(*message);
+                }
                 ++it;
             }
         });
@@ -482,6 +496,28 @@ private:
         }
         
         return demangled;
+    }
+    
+    /**
+     * Return a new default-constructed instance of the given type, or a null
+     * pointer if it is not default constructible.
+     *
+     * This version matches default-consttructable types.
+     */
+    template <typename T>
+    static typename std::enable_if<std::is_default_constructible<T>::value, unique_ptr<T>>::type make_default_or_null() {
+        return make_unique<T>();
+    }
+    
+    /**
+     * Return a new default-constructed instance of the given type, or a null
+     * pointer if it is not default constructible.
+     *
+     * This version matches non-default-consttructable types.
+     */
+    template <typename T>
+    static typename std::enable_if<!std::is_default_constructible<T>::value, unique_ptr<T>>::type make_default_or_null() {
+        return unique_ptr<T>(nullptr);
     }
 };
 
