@@ -232,7 +232,7 @@ auto ProtobufIterator<T>::fill_value() -> void {
         // <https://stackoverflow.com/a/35172491>
        
         // Make an ArrayInputStream over the string data
-        google::protobuf::io::ArrayInputStream array_stream(message.c_str(), message.size());
+        google::protobuf::io::ArrayInputStream array_stream(message->c_str(), message->size());
         
         // Make a CodedInputStream to decode form it
         google::protobuf::io::CodedInputStream coded_stream(&array_stream);
