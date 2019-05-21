@@ -11,8 +11,6 @@ namespace io {
 
 using namespace std;
 
-#define debug
-
 MessageEmitter::MessageEmitter(ostream& out, size_t max_group_size) :
     group(),
     max_group_size(max_group_size),
