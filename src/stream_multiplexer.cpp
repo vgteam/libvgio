@@ -4,6 +4,7 @@
  */
 
 #include "vg/io/stream_multiplexer.hpp"
+#include <iostream>
 
 namespace vg {
 
@@ -99,6 +100,11 @@ bool StreamMultiplexer::want_breakpoint(size_t thread_number) {
 }
 
 void StreamMultiplexer::writer_thread_function() {
+    // Track the max bytes obeserved in any queue
+    size_t high_water_bytes = 0;
+    // And max length
+    size_t high_water_length = 0;
+
     while(!writer_stop.load()) {
         // We have not been asked to stop.
         for (size_t i = 0; i < thread_queues.size(); i++) {
@@ -107,6 +113,11 @@ void StreamMultiplexer::writer_thread_function() {
             // Lock it
             thread_queue_mutexes[i].lock();
             if (!thread_queues[i].empty()) {
+                // Record length
+                high_water_length = max(high_water_length, thread_queues[i].size());
+                // Record data size
+                high_water_bytes = max(high_water_bytes, thread_queue_byte_counts[i]);
+                
                 // Pop off the chunk to write
                 stringstream emptying(std::move(thread_queues[i].front()));
                 thread_queues[i].pop_front();
@@ -132,8 +143,11 @@ void StreamMultiplexer::writer_thread_function() {
     // queues, and the final buffers if they were too small.
     // No locks since none of the other threads are allowed to be writing now
     // (our destructor has started).
-    for (auto& queue : thread_queues) {
-        for (auto& item : queue) {
+    for (size_t i = 0; i < thread_queues.size(); i++) {
+        // Record sizes
+        high_water_length = max(high_water_length, thread_queues[i].size());
+        high_water_bytes = max(high_water_bytes, thread_queue_byte_counts[i]);
+        for (auto& item : thread_queues[i]) {
             // Just ship out all the items in place without dequeueing
             backing_stream << item.rdbuf();
         }
@@ -142,7 +156,8 @@ void StreamMultiplexer::writer_thread_function() {
         // Ship out the final partial chunks without sending them through the queues.
         backing_stream << item.rdbuf();
     }
-     
+    
+    cerr << "StreamMultiplexer high water mark: " << high_water_length << " items, " << high_water_bytes << " bytes" << endl;
 }
 
 
