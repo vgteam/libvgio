@@ -40,8 +40,7 @@ public:
     /**
      * Clean up and flush a StreamMultiplexer.
      *
-     * All user threads must not have written anything since their last
-     * register_breakpoint() call.
+     * Assumes a final breakpoint on all streams.
      */
     ~StreamMultiplexer();
     
@@ -76,6 +75,15 @@ public:
      * Takes the thread number of the thread whose output we can break.
      */
     void register_breakpoint(size_t thread_number);
+    
+    /**
+     * Check if the multiplexer would like a breakpoint (i.e. has a substantial
+     * amount of data been written since the last breakpoint.
+     *
+     * Writers can check this and conditionally flush their internal buffers to
+     * get to a good interleave-able state at regular intervals.
+     */
+    bool want_breakpoint(size_t thread_number);
     
 private:
 

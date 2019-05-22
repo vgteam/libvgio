@@ -97,6 +97,10 @@ public:
     /// Doesn't actually flush the underlying streams to disk.
     /// Assumes that no more than one group's worth of messages are in the buffer.
     void emit_group();
+    
+    /// Write out anything in the buffer, and flush the backing streams.
+    /// After this has been called, a full BGZF block will be in the backing stream.
+    void flush();
 
 private:
 

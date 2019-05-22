@@ -92,12 +92,13 @@ public:
     /// progress.
     virtual void EndFile();
     
-protected:
-    
     /// Actually dump the buffer data to the BGZF, if needed. Sadly, we can't
     /// really be zero-copy because the BGZF library isn't.
     /// Throws on failure.
-    void flush();
+    /// On success, the BGZF file will have written a finished block.
+    void Flush();
+    
+protected:
     
     /// Force the BGZF handle closed without letting the library write its EOF marker.
     /// TODO: This is necessarily a hack that depends strongly on htslib internals.

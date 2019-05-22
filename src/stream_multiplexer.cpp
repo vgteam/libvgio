@@ -88,6 +88,16 @@ void StreamMultiplexer::register_breakpoint(size_t thread_number) {
     
 }
 
+bool StreamMultiplexer::want_breakpoint(size_t thread_number) {
+    stringstream& our_stream = thread_streams.at(thread_number);
+    
+    // See how much data it has
+    size_t item_bytes = our_stream.tellp();
+    
+    // Ask them to giev us a break if they have enough bytes for us to ship out.
+    return (item_bytes >= MIN_QUEUE_ITEM_BYTES);
+}
+
 void StreamMultiplexer::writer_thread_function() {
     while(!writer_stop.load()) {
         // We have not been asked to stop.
