@@ -102,8 +102,8 @@ BlockedGzipOutputStream::~BlockedGzipOutputStream() {
 
 bool BlockedGzipOutputStream::Next(void** data, int* size) {
     try {
-        // Dump data if we have it
-        Flush();
+        // Dump data if we have it, but stay in the current BGZF block.
+        flush_self();
         
         // Allocate some space in the buffer
         buffer.resize(4096);
@@ -157,8 +157,8 @@ int64_t BlockedGzipOutputStream::Tell() {
     if (know_offset) {
         // Our virtual offsets are true.
         
-        // Make sure all data has been sent to BGZF
-        Flush();
+        // Make sure all data has been sent to BGZF, but stay in the current block
+        flush_self();
         
         // See where we are now. No de-aliasing is necessary; the BGZF never
         // leaves the cursor past the end of the block when writing, so we
@@ -186,6 +186,17 @@ void BlockedGzipOutputStream::EndFile() {
 }
 
 void BlockedGzipOutputStream::Flush() {
+    // Send all our data to the BGZF
+    flush_self();
+
+    // Actually flush the backing BGZF and end the current block.
+    if (bgzf_flush(handle) != 0) {
+        // We failed to flush
+        throw runtime_error("IO error flushing in BlockedGzipOutputStream");
+    }
+}
+
+void BlockedGzipOutputStream::flush_self() {
     // How many bytes are left to write?
     auto outstanding = buffer.size() - backed_up;
     if (outstanding > 0) {
@@ -207,12 +218,6 @@ void BlockedGzipOutputStream::Flush() {
         // Make sure we don't try and write the same data twice by scrapping the buffer.
         buffer.resize(0);
         backed_up = 0;
-    }
-    
-    // Actually flush the backing BGZF and end the current block.
-    if (bgzf_flush(handle) != 0) {
-        // We failed to flush
-        throw runtime_error("IO error flushing in BlockedGzipOutputStream");
     }
 }
 
