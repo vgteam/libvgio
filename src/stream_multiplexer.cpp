@@ -100,23 +100,33 @@ bool StreamMultiplexer::want_breakpoint(size_t thread_number) {
 }
 
 void StreamMultiplexer::writer_thread_function() {
+#ifdef debug
     // Track the max bytes obeserved in any queue
     size_t high_water_bytes = 0;
     // And max length
     size_t high_water_length = 0;
+#endif
 
     while(!writer_stop.load()) {
         // We have not been asked to stop.
+        
+        // We set this if we write anything.
+        // If we don't have any work to do on a whole pass, we yield so we
+        // don't constantly spin.
+        bool found_data = false;
+        
         for (size_t i = 0; i < thread_queues.size(); i++) {
             // For each queue
             
             // Lock it
             thread_queue_mutexes[i].lock();
             if (!thread_queues[i].empty()) {
+#ifdef debug
                 // Record length
                 high_water_length = max(high_water_length, thread_queues[i].size());
                 // Record data size
                 high_water_bytes = max(high_water_bytes, thread_queue_byte_counts[i]);
+#endif
                 
                 // Pop off the chunk to write
                 stringstream emptying(std::move(thread_queues[i].front()));
@@ -132,10 +142,18 @@ void StreamMultiplexer::writer_thread_function() {
                 // Turns out you can just shift in the streambuf.
                 // See https://stackoverflow.com/a/4064736
                 backing_stream << emptying.rdbuf();
+                
+                // Say we had work to do
+                found_data = true;
             } else {
                 // Unlock right away
                 thread_queue_mutexes[i].unlock();
             }
+        }
+        
+        if (!found_data) {
+            // Don't spin constantly with nothing to do.
+            std::current_thread::yield();
         }
     }
     
@@ -144,9 +162,11 @@ void StreamMultiplexer::writer_thread_function() {
     // No locks since none of the other threads are allowed to be writing now
     // (our destructor has started).
     for (size_t i = 0; i < thread_queues.size(); i++) {
+#ifdef debug
         // Record sizes
         high_water_length = max(high_water_length, thread_queues[i].size());
         high_water_bytes = max(high_water_bytes, thread_queue_byte_counts[i]);
+#endif
         for (auto& item : thread_queues[i]) {
             // Just ship out all the items in place without dequeueing
             backing_stream << item.rdbuf();
@@ -157,7 +177,9 @@ void StreamMultiplexer::writer_thread_function() {
         backing_stream << item.rdbuf();
     }
     
+#ifdef debug
     cerr << "StreamMultiplexer high water mark: " << high_water_length << " items, " << high_water_bytes << " bytes" << endl;
+#endif
 }
 
 
