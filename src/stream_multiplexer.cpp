@@ -153,7 +153,7 @@ void StreamMultiplexer::writer_thread_function() {
         
         if (!found_data) {
             // Don't spin constantly with nothing to do.
-            std::current_thread::yield();
+            std::this_thread::yield();
         }
     }
     
