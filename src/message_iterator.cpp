@@ -28,7 +28,7 @@ MessageIterator::MessageIterator(unique_ptr<BlockedGzipInputStream>&& bgzf) :
     item_vo(-1),
     bgzip_in(std::move(bgzf))
 {
-    get_next();
+    advance();
 }
 
 auto MessageIterator::operator*() const -> const TaggedMessage& {
@@ -64,7 +64,7 @@ auto MessageIterator::operator++() -> const MessageIterator& {
         // Make a CodedInputStream to read the group length
         ::google::protobuf::io::CodedInputStream coded_in(bgzip_in.get());
         // Alot space for group's length, tag's length, and tag (generously)
-        coded_in.SetTotalBytesLimit(MAX_MESSAGE_SIZE * 2);
+        coded_in.SetTotalBytesLimit(MAX_MESSAGE_SIZE * 2, MAX_MESSAGE_SIZE * 10);
         
         // Try and read the group's length
         if (!coded_in.ReadVarint64((::google::protobuf::uint64*) &group_count)) {
@@ -79,7 +79,7 @@ auto MessageIterator::operator++() -> const MessageIterator& {
             group_vo = -1;
             item_vo = -1;
             value.first.clear();
-            value.second.clear();
+            value.second.reset();
             return *this;
         }
         
@@ -98,7 +98,7 @@ auto MessageIterator::operator++() -> const MessageIterator& {
         handle(coded_in.ReadVarint32(&tagSize));
         
         if (tagSize > MAX_MESSAGE_SIZE) {
-            throw runtime_error("[io::MessageIterator::get_next] tag of " +
+            throw runtime_error("[io::MessageIterator::advance] tag of " +
                                 to_string(tagSize) + " bytes is too long");
         }
         
@@ -152,7 +152,7 @@ auto MessageIterator::operator++() -> const MessageIterator& {
         if (!is_tag) {
             // If we get here, the registry doesn't think it's a tag.
             // Assume it is actually a message, and make the group's tag ""
-            swap(value.first, value.second);
+            value.second = make_unique<string>(std::move(value.first));
             value.first.clear();
             previous_tag.clear();
             
@@ -172,8 +172,24 @@ auto MessageIterator::operator++() -> const MessageIterator& {
         // Back up its value in case our pair gets moved away.
         previous_tag = value.first;
         
-        // We continue and read the real first message into the message half of our pair.
+        if (is_tag && group_count == 1) {
+            // This group is a tag *only*.
+            // If we hit the end of the loop we'll just skip over it.
+            // We want to emit it as a pair of (tag, null).
+            // So we consider our increment complete here.
+            
+#ifdef debug
+            cerr << "Found message-less tag \"" << value.first << "\"" << endl;
+#endif
+            
+            value.second.reset();
+            return *this;
+        }
+        
+        // We continue through all empty groups.
     }
+    
+    // Now we know we have a message to go with our tag.
     
     // Now we know we're in a group, and we know the tag, if any.
     
@@ -199,15 +215,20 @@ auto MessageIterator::operator++() -> const MessageIterator& {
     handle(coded_in.ReadVarint32(&msgSize));
     
     if (msgSize > MAX_MESSAGE_SIZE) {
-        throw runtime_error("[io::MessageIterator::get_next] message of " +
+        throw runtime_error("[io::MessageIterator::advance] message of " +
                             to_string(msgSize) + " bytes is too long");
     }
     
     
     // We have a message.
-    value.second.clear();
+    // Make an empty string to hold it.
+    if (value.second.get() != nullptr) {
+        value.second->clear();
+    } else {
+        value.second = make_unique<string>();
+    }
     if (msgSize) {
-        handle(coded_in.ReadString(&value.second, msgSize));
+        handle(coded_in.ReadString(value.second.get(), msgSize));
     }
     
     // Fill in the tag from the previous to make sure our value pair actually has it.
@@ -227,26 +248,26 @@ auto MessageIterator::operator++() -> const MessageIterator& {
 
 auto MessageIterator::operator==(const MessageIterator& other) const -> bool {
     // Just ask if we both agree on whether we hit the end.
-    return has_next() == other.has_next();
+    return has_current() == other.has_current();
 }
     
 auto MessageIterator::operator!=(const MessageIterator& other) const -> bool {
     // Just ask if we disagree on whether we hit the end.
-    return has_next() != other.has_next();
+    return has_current() != other.has_current();
 }
 
-auto MessageIterator::has_next() const -> bool {
+auto MessageIterator::has_current() const -> bool {
     return item_vo != -1;
 }
 
-auto MessageIterator::get_next() -> void {
+auto MessageIterator::advance() -> void {
     // Run increment but don't return anything.
     ++(*this);
 }
 
 auto MessageIterator::take() -> TaggedMessage {
     auto temp = std::move(value);
-    get_next();
+    advance();
     // Return by value, which gets moved.
     return temp;
 }
@@ -304,7 +325,7 @@ auto MessageIterator::seek_group(int64_t virtual_offset) -> bool {
 #endif
     
     // Read it (or detect EOF)
-    get_next();
+    advance();
     
     // It worked!
     return true;

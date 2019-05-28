@@ -19,6 +19,7 @@
 #include <type_traits>
 #include <functional>
 #include <iostream>
+#include <vector>
 #include <google/protobuf/util/type_resolver.h>
 
 namespace vg {
@@ -125,7 +126,7 @@ public:
      * groups (for backward compatibility).
      */
     template<typename Handled, typename... Bases>
-    static void register_loader_saver(const vector<string>& tags, load_function_t loader, save_function_t saver);
+    static void register_loader_saver(const std::vector<std::string>& tags, load_function_t loader, save_function_t saver);
     
     /**
      * Register a loading function and a saving function with the given tag for
@@ -290,7 +291,7 @@ void Registry::register_loader(const string& tag, load_function_t loader) {
     
     // And for the base classes.
     // Expand over all the base types in an initializer list and use an assignment expression to fill a dummy vector.
-    vector<load_function_t> dummy{(tables.tag_to_loader[tag][type_index(typeid(Bases))] = loader)...};
+    std::vector<load_function_t> dummy{(tables.tag_to_loader[tag][type_index(typeid(Bases))] = loader)...};
 }
 
 template<typename Handled>
@@ -320,11 +321,11 @@ void Registry::register_saver(const string& tag, save_function_t saver) {
 template<typename Handled, typename... Bases>
 void Registry::register_loader_saver(const string& tag, load_function_t loader, save_function_t saver) {
     // Dispatch to the vector implementation
-    register_loader_saver<Handled, Bases...>(vector<string>{tag}, loader, saver);
+    register_loader_saver<Handled, Bases...>(std::vector<std::string>{tag}, loader, saver);
 }
 
 template<typename Handled, typename... Bases>
-void Registry::register_loader_saver(const vector<string>& tags, load_function_t loader, save_function_t saver) {
+void Registry::register_loader_saver(const std::vector<std::string>& tags, load_function_t loader, save_function_t saver) {
     // There must be tags
     assert(!tags.empty());
 
