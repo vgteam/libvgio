@@ -257,7 +257,8 @@ void for_each_parallel_impl(std::istream& in,
 #ifdef debug
             cerr << "Run final batch of size " << batch->size() << " in current thread" << endl;
 #endif
-            {
+            if (!batch->empty()) {
+                // We require the batch to not be empty (so we can subtract from the size).
                 T obj1, obj2;
                 int i = 0;
                 for (; i < batch->size()-1; i+=2) {
@@ -269,7 +270,7 @@ void for_each_parallel_impl(std::istream& in,
                     handle(obj1.ParseFromString(batch->at(i)));
                     lambda1(obj1);
                 }
-            } // scope obj1 & obj2
+            }
             delete batch;
         }
     }
