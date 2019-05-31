@@ -30,6 +30,10 @@ StreamMultiplexer::StreamMultiplexer(ostream& backing, size_t max_threads) :
 }
 
 StreamMultiplexer::~StreamMultiplexer() {
+#ifdef debug
+    cerr << "StreamMultiplexer destructing" << endl;
+#endif
+
     // Tell the writer to finish.
     writer_stop.store(true);
     // Wait for it to finish.
@@ -38,6 +42,10 @@ StreamMultiplexer::~StreamMultiplexer() {
     // Make sure to flush the backing stream, so output is on disk.
     // Probably not necessary, but makes sense.
     backing_stream.flush();
+    
+#ifdef debug
+    cerr << "StreamMultiplexer destroyed" << endl;
+#endif
 }
 
 ostream& StreamMultiplexer::get_thread_stream(size_t thread_number) {
@@ -57,6 +65,10 @@ void StreamMultiplexer::register_breakpoint(size_t thread_number) {
     
     if (item_bytes >= MIN_QUEUE_ITEM_BYTES) {
         // We have enough data to justify a block.
+        
+#ifdef debug
+    cerr << "StreamMultiplexer registered breakpoint for " << item_bytes << " bytes in thread " << thread_number << endl;
+#endif
         
         // Lock our queue
         thread_queue_mutexes[thread_number].lock();
@@ -85,7 +97,12 @@ void StreamMultiplexer::register_breakpoint(size_t thread_number) {
         // Move might do this but it's not guaranteed.
         our_stream.str(std::string());
         our_stream.clear();
+    } else {
+#ifdef debug
+    cerr << "StreamMultiplexer skipped breakpoint for " << item_bytes << " bytes in thread " << thread_number << endl;
+#endif
     }
+    
     
 }
 
@@ -196,6 +213,10 @@ void StreamMultiplexer::writer_thread_function() {
                 stringstream emptying(std::move(thread_queues[i].front()));
                 thread_queues[i].pop_front();
                 
+#ifdef debug
+                cerr << "StreamMultiplexer writing " <<  emptying.tellp() << " bytes from thread " << i << endl;
+#endif
+                
                 // Record we removed its data from the queue
                 thread_queue_byte_counts[i] -= emptying.tellp();
                 
@@ -203,9 +224,11 @@ void StreamMultiplexer::writer_thread_function() {
                 thread_queue_mutexes[i].unlock();
                 
                 // Now dump to the backing stream.
-                // Turns out you can just shift in the streambuf.
+                // TODO: in theory, you can just shift the rdbuf() from the one stream into the other.
                 // See https://stackoverflow.com/a/4064736
-                backing_stream << emptying.rdbuf();
+                // In practice, this was dropping data when clearing out the final buffers for each thread.
+                // So we have switched to str() throughout, possibly causing an extra copy.
+                backing_stream << emptying.str();
                 
                 // Say we had work to do
                 found_data = true;
@@ -233,12 +256,24 @@ void StreamMultiplexer::writer_thread_function() {
 #endif
         for (auto& item : thread_queues[i]) {
             // Just ship out all the items in place without dequeueing
-            backing_stream << item.rdbuf();
+            
+#ifdef debug
+            cerr << "StreamMultiplexer finishing with " <<  item.tellp() << " queued bytes from thread " << i << endl;
+#endif
+            
+            backing_stream << item.str();
         }
     }
     for (auto& item : thread_streams) {
         // Ship out the final partial chunks without sending them through the queues.
-        backing_stream << item.rdbuf();
+        
+        if (item.tellp() > 0) {
+#ifdef debug
+            cerr << "StreamMultiplexer finishing with " <<  item.tellp() << " unqueued bytes" << endl;
+#endif
+        
+            backing_stream << item.str();
+        }
     }
     
 #ifdef debug
