@@ -153,6 +153,16 @@ void StreamMultiplexer::register_barrier(size_t thread_number) {
     thread_queue_mutexes[thread_number].unlock();
 }
 
+void StreamMultiplexer::discard_to_breakpoint(size_t thread_number) {
+    // Get our stream
+    stringstream& our_stream = thread_streams.at(thread_number);
+    
+    // Reset the stream so it can be filled up again.
+    // Empty the contents and clear the state bits.
+    our_stream.str(std::string());
+    our_stream.clear();
+}
+
 void StreamMultiplexer::writer_thread_function() {
 #ifdef debug
     // Track the max bytes obeserved in any queue

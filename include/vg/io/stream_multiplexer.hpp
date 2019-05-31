@@ -93,6 +93,12 @@ public:
      * breakpoint.
      */
      void register_barrier(size_t thread_number);
+     
+    /**
+     * Cancel the writing of and discard all data written since the previous
+     * breakpoint for the given thread.
+     */
+    void discard_to_breakpoint(size_t thread_number);
     
 private:
 
