@@ -85,6 +85,15 @@ public:
      */
     bool want_breakpoint(size_t thread_number);
     
+    /**
+     * Send along whatever has been written for the given thread's stream to
+     * the output stream. Only returns once any subsequent write by another
+     * thread is guaranteed to appear later in the file than what has been
+     * written by the given thread so far. Implicitly also creates a
+     * breakpoint.
+     */
+     void register_barrier(size_t thread_number);
+    
 private:
 
     /// Remember the backing stream we wrap

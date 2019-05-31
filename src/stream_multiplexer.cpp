@@ -99,6 +99,60 @@ bool StreamMultiplexer::want_breakpoint(size_t thread_number) {
     return (item_bytes >= MIN_QUEUE_ITEM_BYTES);
 }
 
+void StreamMultiplexer::register_barrier(size_t thread_number) {
+    // Get our stream
+    stringstream& our_stream = thread_streams.at(thread_number);
+    
+    // See how much data it has
+    size_t item_bytes = our_stream.tellp();
+    
+    // Whether our block is big enough or not, put it in the queue
+    
+    // Lock our queue
+    thread_queue_mutexes[thread_number].lock();
+    
+    while (thread_queue_byte_counts[thread_number] >= MAX_THREAD_QUEUE_BYTES) {
+        // The queue is over-full.
+        
+        // Unlock, yield, and lock again, to give the writer time to empty our queue.
+        thread_queue_mutexes[thread_number].unlock();
+        std::this_thread::yield();
+        thread_queue_mutexes[thread_number].lock();
+        // TODO: use a condition variable here to alert the writer that we want writing.
+    }
+    
+    // Add in the space usage
+    thread_queue_byte_counts[thread_number] += item_bytes;
+    
+    // Move the stream into the queue at the back
+    thread_queues[thread_number].emplace_back(std::move(our_stream));
+    
+    // Unlock the queue
+    thread_queue_mutexes[thread_number].unlock();
+    
+    // Reset the stream so it can be filled up again.
+    // Empty the contents and clear the state bits.
+    // Move might do this but it's not guaranteed.
+    our_stream.str(std::string());
+    our_stream.clear();
+    
+    // Don't return until our queue is empty. If our queue is empty, our data
+    // will come out before anything written subsequently, since the writer
+    // thread either has already written our data or is currently doing it.
+    
+    // Yield at least once to give the writer a chance to write the first time around.
+    std::this_thread::yield();
+    
+    thread_queue_mutexes[thread_number].lock();
+    while (!thread_queues[thread_number].empty()) {
+        // Unlock, yield, and lock again, to give the writer time to empty our queue.
+        thread_queue_mutexes[thread_number].unlock();
+        std::this_thread::yield();
+        thread_queue_mutexes[thread_number].lock();
+    }
+    thread_queue_mutexes[thread_number].unlock();
+}
+
 void StreamMultiplexer::writer_thread_function() {
 #ifdef debug
     // Track the max bytes obeserved in any queue
