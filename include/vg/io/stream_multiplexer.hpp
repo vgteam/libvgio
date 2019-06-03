@@ -100,13 +100,29 @@ public:
      */
     void discard_to_breakpoint(size_t thread_number);
     
+    /**
+     * Cancel the writing of the last count bytes written since the last
+     * breakpoint for the given thread. If count is more than the number of
+     * bytes since the last breakpoint, rewinds only to the last breakpoint.
+     */
+     void discard_bytes(size_t thread_number, size_t count);
+    
 private:
 
     /// Remember the backing stream we wrap
     ostream& backing_stream;
 
-    /// Each thread gets a slot in this vector for a stringstream it is supposed to be currently writing to.
+    /// Each thread gets a slot in this vector for a stringstream it is
+    /// supposed to be currently writing to.
     vector<stringstream> thread_streams;
+    
+    /// Not every breakpoint results in the stream for a thread being cleared
+    /// out and enqueued. We only actually use a breakpoint if we have enough
+    /// data in the stream. But we still have to support discard_to_breakpoint.
+    /// So we keep a cursor for where the most recent breakpoint was. The
+    /// actual current position in each stream is tracked by the put pointer
+    /// (seekp()/tellp()).
+    vector<size_t> thread_breakpoint_cursors;
     
     /// When a thread reaches a breakpoint and its stringstream is big enough,
     /// its full stringstream is moved into this queue at the back, and a new
