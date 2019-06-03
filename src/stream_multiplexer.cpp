@@ -13,16 +13,19 @@ namespace io {
 using namespace std;
 
 
-/// Don't allow more than 10 MB queued data per queue.
-size_t StreamMultiplexer::MAX_THREAD_QUEUE_BYTES = 10 * 1024 * 1024;
 /// Don't deal with anything smaller than a few BGZF blocks.
-size_t StreamMultiplexer::MIN_QUEUE_ITEM_BYTES = 10 * 64 * 1024;
+const size_t StreamMultiplexer::MIN_QUEUE_ITEM_BYTES = 10 * 64 * 1024;
+
+/// Don't allow more than a few items per ring buffer
+const size_t StreamMultiplexer::RING_BUFFER_SIZE = 10;
 
 StreamMultiplexer::StreamMultiplexer(ostream& backing, size_t max_threads) :
     backing_stream(backing),
     thread_streams(max_threads),
     thread_breakpoint_cursors(max_threads, 0),
-    thread_queues(max_threads),
+    thread_queues(max_threads, vector<string>(RING_BUFFER_SIZE)),
+    thread_queue_empty_slots(max_threads, 0),
+    thread_queue_filled_slots(max_threads, 0),
     thread_queue_byte_counts(max_threads, 0), 
     thread_queue_mutexes(max_threads),
     writer_stop(false),
@@ -74,7 +77,7 @@ void StreamMultiplexer::register_breakpoint(size_t thread_number) {
         // Lock our queue
         thread_queue_mutexes[thread_number].lock();
         
-        while (thread_queue_byte_counts[thread_number] >= MAX_THREAD_QUEUE_BYTES) {
+        while (ring_buffer_full(thread_number)) {
             // The queue is over-full.
             
             // Unlock, yield, and lock again, to give the writer time to empty our queue.
@@ -87,8 +90,9 @@ void StreamMultiplexer::register_breakpoint(size_t thread_number) {
         // Add in the space usage
         thread_queue_byte_counts[thread_number] += item_bytes;
         
-        // Move the stream into the queue at the back
-        thread_queues[thread_number].emplace_back(std::move(our_stream));
+        // Move the right number of bytes from the stringstream into the queue at the back
+        // TODO: can we avoid a copy here?
+        ring_buffer_push(thread_number) = std::move(our_stream.str().substr(0, item_bytes));
         
         // Unlock the queue
         thread_queue_mutexes[thread_number].unlock();
@@ -136,7 +140,7 @@ void StreamMultiplexer::register_barrier(size_t thread_number) {
     // Lock our queue
     thread_queue_mutexes[thread_number].lock();
     
-    while (thread_queue_byte_counts[thread_number] >= MAX_THREAD_QUEUE_BYTES) {
+    while (ring_buffer_full(thread_number)) {
         // The queue is over-full.
         
         // Unlock, yield, and lock again, to give the writer time to empty our queue.
@@ -149,8 +153,9 @@ void StreamMultiplexer::register_barrier(size_t thread_number) {
     // Add in the space usage
     thread_queue_byte_counts[thread_number] += item_bytes;
     
-    // Move the stream into the queue at the back
-    thread_queues[thread_number].emplace_back(std::move(our_stream));
+    // Move the right number of bytes from the stringstream into the queue at the back
+    // TODO: can we avoid a copy here?
+    ring_buffer_push(thread_number) = std::move(our_stream.str().substr(0, item_bytes));
     
     // Unlock the queue
     thread_queue_mutexes[thread_number].unlock();
@@ -172,7 +177,7 @@ void StreamMultiplexer::register_barrier(size_t thread_number) {
     std::this_thread::yield();
     
     thread_queue_mutexes[thread_number].lock();
-    while (!thread_queues[thread_number].empty()) {
+    while (!ring_buffer_empty(thread_number)) {
         // Unlock, yield, and lock again, to give the writer time to empty our queue.
         thread_queue_mutexes[thread_number].unlock();
         std::this_thread::yield();
@@ -221,8 +226,6 @@ void StreamMultiplexer::writer_thread_function() {
 #ifdef debug
     // Track the max bytes obeserved in any queue
     size_t high_water_bytes = 0;
-    // And max length
-    size_t high_water_length = 0;
 #endif
 
     while(!writer_stop.load()) {
@@ -238,21 +241,17 @@ void StreamMultiplexer::writer_thread_function() {
             
             // Lock it
             thread_queue_mutexes[i].lock();
-            if (!thread_queues[i].empty()) {
+            if (!ring_buffer_empty(i)) {
 #ifdef debug
-                // Record length
-                high_water_length = max(high_water_length, thread_queues[i].size());
                 // Record data size
                 high_water_bytes = max(high_water_bytes, thread_queue_byte_counts[i]);
 #endif
                 
-                // Pop off the chunk to write
-                stringstream emptying(std::move(thread_queues[i].front()));
-                thread_queues[i].pop_front();
+                // Find the chunk to write.
+                const string& emptying = ring_buffer_peek(i);
                 
-                // Count how many bytes in the string we actually want.
-                // We may have rewound some.
-                size_t data_bytes = emptying.tellp();
+                // Count how many bytes are in the string.
+                size_t data_bytes = emptying.size();
                 
 #ifdef debug
                 cerr << "StreamMultiplexer writing " << data_bytes  << " bytes from thread " << i << endl;
@@ -264,13 +263,13 @@ void StreamMultiplexer::writer_thread_function() {
                 // Unlock now
                 thread_queue_mutexes[i].unlock();
                 
-                // Now dump to the backing stream.
-                // TODO: in theory, you can just shift the rdbuf() from the one stream into the other.
-                // See https://stackoverflow.com/a/4064736
-                // In practice, this was dropping data when clearing out the final buffers for each thread.
-                // So we have switched to str() throughout, possibly causing an extra copy.
-                // This lets us easily truncate to the non-rewound part.
-                backing_stream << emptying.str().substr(0, data_bytes);
+                // Dump the data block. We know it won't leave the queue unless we pop it.
+                backing_stream << emptying;
+                
+                /// Lock again and pop. Nobody else could have removed the thing we were working on.
+                thread_queue_mutexes[i].lock();
+                ring_buffer_pop(i);
+                thread_queue_mutexes[i].unlock();
                 
                 // Say we had work to do
                 found_data = true;
@@ -293,20 +292,21 @@ void StreamMultiplexer::writer_thread_function() {
     for (size_t i = 0; i < thread_queues.size(); i++) {
 #ifdef debug
         // Record sizes
-        high_water_length = max(high_water_length, thread_queues[i].size());
         high_water_bytes = max(high_water_bytes, thread_queue_byte_counts[i]);
 #endif
-        for (auto& item : thread_queues[i]) {
-            // Just ship out all the items in place without dequeueing
+        while (!ring_buffer_empty(i)) {
+            auto& item = ring_buffer_peek(i);
             
-            // Get how many bytes are not rewound.
-            size_t data_bytes = item.tellp();
+            // Get how many bytes are in the string buffer.
+            size_t data_bytes = item.size();
             
 #ifdef debug
             cerr << "StreamMultiplexer finishing with " << data_bytes << " queued bytes from thread " << i << endl;
 #endif
             
-            backing_stream << item.str().substr(0, data_bytes);
+            backing_stream << item;
+            
+            ring_buffer_pop(i);
         }
     }
     for (auto& item : thread_streams) {
@@ -327,6 +327,57 @@ void StreamMultiplexer::writer_thread_function() {
 #ifdef debug
     cerr << "StreamMultiplexer high water mark: " << high_water_length << " items, " << high_water_bytes << " bytes" << endl;
 #endif
+}
+
+bool StreamMultiplexer::ring_buffer_full(size_t thread_number) const {
+    auto& empty = thread_queue_empty_slots[thread_number];
+    auto& filled = thread_queue_filled_slots[thread_number];
+
+    // We are full if empty is 1 before filled, because we leave one slot open
+    return (empty + 1 == filled || (empty + 1 == RING_BUFFER_SIZE && filled == 0));
+}
+
+bool StreamMultiplexer::ring_buffer_empty(size_t thread_number) const {
+    auto& empty = thread_queue_empty_slots[thread_number];
+    auto& filled = thread_queue_filled_slots[thread_number];
+
+    // We are empty if empty is filled
+    return (empty == filled);
+}
+
+string& StreamMultiplexer::ring_buffer_push(size_t thread_number) {
+    auto& empty = thread_queue_empty_slots[thread_number];
+    auto& buffer = thread_queues[thread_number];
+    
+    // Grab the empty slot
+    auto& slot = buffer[empty];
+    
+    // Advance the empty cursor
+    empty++;
+    if (empty == RING_BUFFER_SIZE) {
+        // And wrap
+        empty = 0;
+    }
+    
+    return slot;
+}
+
+const string& StreamMultiplexer::ring_buffer_peek(size_t thread_number) {
+    auto& filled = thread_queue_filled_slots[thread_number];
+    auto& buffer = thread_queues[thread_number];
+    
+    return buffer[filled];
+}
+
+void StreamMultiplexer::ring_buffer_pop(size_t thread_number) {
+    auto& filled = thread_queue_filled_slots[thread_number];
+    
+    // Advance the filled cursor
+    filled++;
+    if (filled == RING_BUFFER_SIZE) {
+        // And wrap
+        filled = 0;
+    }
 }
 
 

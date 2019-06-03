@@ -125,9 +125,23 @@ private:
     vector<size_t> thread_breakpoint_cursors;
     
     /// When a thread reaches a breakpoint and its stringstream is big enough,
-    /// its full stringstream is moved into this queue at the back, and a new
-    /// one created in place.
-    vector<list<stringstream>> thread_queues;
+    /// its string data is copied into this queue at the back, and the stream
+    /// is emptied.
+    ///
+    /// We use a ring buffer, so that the writer thread never needs to
+    /// deallocate anything. To prevent ambiguity, the ring buffer always
+    /// contains at least 1 empty slot.
+    vector<vector<string>> thread_queues;
+    /// This is the number of the next slot in the ring buffer whose data can
+    /// be overwritten.
+    vector<size_t> thread_queue_empty_slots;
+    /// This is the number of the last used slot in the ring buffer. If it is
+    /// equal to thread_queue_empty, no slots are used.
+    vector<size_t> thread_queue_filled_slots;
+    
+    // Note that items in the ring buffers are never really cleared out. They
+    // just get overwritten in the worker threads.
+    
     /// This tracks the number of bytes of data in each thread's queue.
     vector<size_t> thread_queue_byte_counts;
     /// Access to each thread's queue and byte count is controlled by a mutex.
@@ -142,13 +156,36 @@ private:
     /// bytes to the real backing stream.
     thread writer_thread;
     
-    /// If a thread's queue has this many bytes or more in it, block inside
-    /// register_breakpoint() until it gets below this threshold.
-    static size_t MAX_THREAD_QUEUE_BYTES;
     /// To prevent constant locking and unlocking of the queues, we want each
     /// item to be relatively substantial.
-    static size_t MIN_QUEUE_ITEM_BYTES;
-   
+    static const size_t MIN_QUEUE_ITEM_BYTES;
+    
+    /// What is the number of slots in each queue ring buffer?
+    static const size_t RING_BUFFER_SIZE;
+    
+    /// Return if the ring buffer for the given thread is full.
+    /// Lock on the thread's ring buffer must be held.
+    bool ring_buffer_full(size_t thread_number) const;
+    
+    /// Return if the ring buffer for the given thread is empty.
+    /// Lock on the thread's ring buffer must be held.
+    bool ring_buffer_empty(size_t thread_number) const;
+    
+    /// Assuming the ring buffer for the given thread is not full, mark the
+    /// next space as occupied and return a reference to it.
+    /// Lock on the thread's ring buffer must be held.
+    string& ring_buffer_push(size_t thread_number);
+    
+    /// Assuming the ring buffer for the given thread is not empty, get a
+    /// reference to the next thing that would be popped.
+    /// Lock on the thread's ring buffer must be held.
+    const string& ring_buffer_peek(size_t thread_number);
+    
+    /// Assuming the ring buffer for the given thread is not empty, remove the
+    /// thing that is visible via peek.
+    /// Lock on the thread's ring buffer must be held.
+    void ring_buffer_pop(size_t thread_number);
+    
     /**
      * Function which is run as the writer thread.
      * Empties queues as fast as it can.
