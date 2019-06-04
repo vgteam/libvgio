@@ -142,7 +142,8 @@ private:
     unique_ptr<BlockedGzipInputStream> bgzip_in;
     
     /// Make sure the given Protobuf-library bool return value is true, and fail otherwise with a message.
-    void handle(bool ok);
+    /// Reports the virtual offset of the invalid group and/or message
+    void handle(bool ok, int64_t group_virtual_offset = 0, int64_t message_virtual_offset = 0);
 };
 
 }
