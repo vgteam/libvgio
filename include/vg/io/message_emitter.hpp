@@ -68,6 +68,7 @@ public:
     MessageEmitter(const MessageEmitter& other) = delete;
     MessageEmitter& operator=(const MessageEmitter& other) = delete;
     // Allow default move
+    // TODO: Implement sensible semantics for moved-out-of MessageEmitters.
     MessageEmitter(MessageEmitter&& other) = default;
     MessageEmitter& operator=(MessageEmitter&& other) = default;
     
@@ -99,7 +100,9 @@ public:
     void emit_group();
     
     /// Write out anything in the buffer, and flush the backing streams.
-    /// After this has been called, a full BGZF block will be in the backing stream.
+    /// After this has been called, a full BGZF block will be in the backing
+    /// stream (passed to the constructor), but the backing stream won't
+    /// necessarily be flushed.
     void flush();
 
 private:
