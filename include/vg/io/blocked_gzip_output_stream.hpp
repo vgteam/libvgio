@@ -20,6 +20,8 @@ class BlockedGzipOutputStream : public ::google::protobuf::io::ZeroCopyOutputStr
 public:
     /// Make a new stream outputting to the given open BGZF file handle.
     /// The stream will own the BGZF file and close it when destructed.
+    /// Note that with this constructor we have no access to the backing
+    /// hFILE*, so Flush() will not be able to flush it.
     BlockedGzipOutputStream(BGZF* bgzf_handle);
     
     /// Make a new stream outputting to the given C++ std::ostream, wrapping it
@@ -93,12 +95,20 @@ public:
     /// progress.
     virtual void EndFile();
     
-protected:
     
+    /// Throws on failure.
+    /// On success, the object used to construct this stream (i.e. the backing
+    /// BGZF or ostream) will have all data previously written to this stream
+    /// in its buffers. Flushes backing BGZFs but not backing ostreams. Flushes
+    /// any intermediate streams we created.
+    void Flush();
+    
+protected:
+
     /// Actually dump the buffer data to the BGZF, if needed. Sadly, we can't
     /// really be zero-copy because the BGZF library isn't.
-    /// Throws on failure.
-    void flush();
+    /// Does *NOT* make the BGZF flush and finish its block.
+    void flush_self();
     
     /// Force the BGZF handle closed without letting the library write its EOF marker.
     /// TODO: This is necessarily a hack that depends strongly on htslib internals.
@@ -107,6 +117,11 @@ protected:
     
     /// The open BGZF handle being written to
     BGZF* handle;
+    
+    /// The hFILE* created to connect the BGZF to the ostream, if we are based
+    /// on an ostream. Really owned by the BGZF, we just need to be able to
+    /// flush it since the BGZF's flush doesn't do that.
+    hFILE* wrapped_ostream;
     
     /// This vector will own the memory we use as our void* buffer.
     std::vector<char> buffer;

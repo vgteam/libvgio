@@ -10,7 +10,9 @@ namespace io {
 
 using namespace std;
 
-BlockedGzipOutputStream::BlockedGzipOutputStream(BGZF* bgzf_handle) : handle(bgzf_handle), buffer(), backed_up(0), byte_count(0),
+BlockedGzipOutputStream::BlockedGzipOutputStream(BGZF* bgzf_handle) :
+    handle(bgzf_handle), wrapped_ostream(nullptr), 
+    buffer(), backed_up(0), byte_count(0),
     know_offset(false), end_file(false) {
     
     if (handle->mt) {
@@ -39,17 +41,18 @@ BlockedGzipOutputStream::BlockedGzipOutputStream(BGZF* bgzf_handle) : handle(bgz
     }
 }
 
-BlockedGzipOutputStream::BlockedGzipOutputStream(std::ostream& stream) : handle(nullptr), buffer(), backed_up(0), byte_count(0),
+BlockedGzipOutputStream::BlockedGzipOutputStream(std::ostream& stream) :
+    handle(nullptr),  wrapped_ostream(hfile_wrap(stream)),
+    buffer(), backed_up(0), byte_count(0),
     know_offset(false), end_file(false) {
     
-    // Wrap the stream in an hFILE*
-    hFILE* wrapped = hfile_wrap(stream);
-    if (wrapped == nullptr) {
+    // Make sure we could wrap the stream in an hFILE*
+    if (wrapped_ostream == nullptr) {
         throw runtime_error("Unable to wrap stream");
     }
     
     // Give ownership of it to a BGZF that writes, which we in turn own.
-    handle = bgzf_hopen(wrapped, "w");
+    handle = bgzf_hopen(wrapped_ostream, "w");
     if (handle == nullptr) {
         throw runtime_error("Unable to set up BGZF library on wrapped stream");
     }
@@ -78,7 +81,7 @@ BlockedGzipOutputStream::~BlockedGzipOutputStream() {
 #endif
 
     // Make sure to finish writing before destructing.
-    flush();
+    Flush();
     
     if (end_file) {
         // Close the file with an EOF block.
@@ -86,6 +89,8 @@ BlockedGzipOutputStream::~BlockedGzipOutputStream() {
         cerr << "Close BlockedGzipOutputStream normally with EOF" << endl;
 #endif
         bgzf_close(handle);
+        handle = nullptr;
+        wrapped_ostream = nullptr;
     } else {
         // Close the BGZF *without* writing an EOF block.
 #ifdef debug
@@ -102,8 +107,8 @@ BlockedGzipOutputStream::~BlockedGzipOutputStream() {
 
 bool BlockedGzipOutputStream::Next(void** data, int* size) {
     try {
-        // Dump data if we have it
-        flush();
+        // Dump data if we have it, but stay in the current BGZF block.
+        flush_self();
         
         // Allocate some space in the buffer
         buffer.resize(4096);
@@ -157,8 +162,8 @@ int64_t BlockedGzipOutputStream::Tell() {
     if (know_offset) {
         // Our virtual offsets are true.
         
-        // Make sure all data has been sent to BGZF
-        flush();
+        // Make sure all data has been sent to BGZF, but stay in the current block
+        flush_self();
         
         // See where we are now. No de-aliasing is necessary; the BGZF never
         // leaves the cursor past the end of the block when writing, so we
@@ -185,7 +190,27 @@ void BlockedGzipOutputStream::EndFile() {
     end_file = true;
 }
 
-void BlockedGzipOutputStream::flush() {
+void BlockedGzipOutputStream::Flush() {
+    // Send all our data to the BGZF
+    flush_self();
+
+    // Actually flush the backing BGZF and end the current block.
+    if (bgzf_flush(handle) != 0) {
+        // We failed to flush
+        throw runtime_error("IO error flushing BGZF in BlockedGzipOutputStream");
+    }
+    
+    if (wrapped_ostream != nullptr) {
+        // We have an hFILE* connecting the bgzf to the user-visible output stream.
+        // Right now some of our data is probably in its buffer. Flush it.
+        if (hflush(wrapped_ostream) != 0) {
+            // We failed to flush
+            throw runtime_error("IO error flushing hFILE* in BlockedGzipOutputStream");
+        } 
+    }
+}
+
+void BlockedGzipOutputStream::flush_self() {
     // How many bytes are left to write?
     auto outstanding = buffer.size() - backed_up;
     if (outstanding > 0) {
@@ -229,6 +254,7 @@ void BlockedGzipOutputStream::force_close() {
     // Do the close operation, which does all the other cleanup still.
     bgzf_close(handle);
     handle = nullptr;
+    wrapped_ostream = nullptr;
 }
 
 }
