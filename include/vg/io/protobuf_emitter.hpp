@@ -93,8 +93,13 @@ public:
     
     /// Actually write out everything in the buffer.
     /// Doesn't actually flush the underlying streams to disk.
-    /// Assumes that no more than one group's worht of items are in the buffer.
+    /// Assumes that no more than one group's worth of items are in the buffer.
     void emit_group();
+    
+    /// Write out anything in the buffer, and flush the backing BGZF and the
+    /// backing stream. After this function is called, a complete BGZF block
+    /// has been output (unless another thead has written something).
+    void flush();
     
 private:
 
@@ -259,6 +264,16 @@ auto ProtobufEmitter<T>::emit_group() -> void {
     lock_guard<mutex> lock(out_mutex);
 
     message_emitter.emit_group();
+}
+
+template<typename T>
+auto ProtobufEmitter<T>::flush() -> void {
+    // Make sure to emit the group.
+    emit_group();
+    
+    // Lock and flush the message emitter.
+    lock_guard<mutex> lock(out_mutex);
+    message_emitter.flush();
 }
 
 template<typename T>

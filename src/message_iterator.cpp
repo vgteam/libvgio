@@ -95,17 +95,18 @@ auto MessageIterator::operator++() -> const MessageIterator& {
         
         // The tag is prefixed by its size
         uint32_t tagSize = 0;
-        handle(coded_in.ReadVarint32(&tagSize));
+        handle(coded_in.ReadVarint32(&tagSize), group_vo);
         
         if (tagSize > MAX_MESSAGE_SIZE) {
-            throw runtime_error("[io::MessageIterator::advance] tag of " +
+            throw runtime_error("[vg::io::MessageIterator::operator++] (group " + 
+                                to_string(group_vo) + ") tag of " +
                                 to_string(tagSize) + " bytes is too long");
         }
         
         // Read it into the tag field of our value
         value.first.clear();
         if (tagSize) {
-            handle(coded_in.ReadString(&value.first, tagSize));
+            handle(coded_in.ReadString(&value.first, tagSize), group_vo);
         }
         
 #ifdef debug
@@ -212,10 +213,11 @@ auto MessageIterator::operator++() -> const MessageIterator& {
     
     // The messages are prefixed by their size
     uint32_t msgSize = 0;
-    handle(coded_in.ReadVarint32(&msgSize));
+    handle(coded_in.ReadVarint32(&msgSize), group_vo, item_vo);
     
     if (msgSize > MAX_MESSAGE_SIZE) {
-        throw runtime_error("[io::MessageIterator::advance] message of " +
+        throw runtime_error("[vg::io::MessageIterator::operator++] (group " + 
+                            to_string(group_vo) + ") message of " +
                             to_string(msgSize) + " bytes is too long");
     }
     
@@ -228,7 +230,7 @@ auto MessageIterator::operator++() -> const MessageIterator& {
         value.second = make_unique<string>();
     }
     if (msgSize) {
-        handle(coded_in.ReadString(value.second.get(), msgSize));
+        handle(coded_in.ReadString(value.second.get(), msgSize), group_vo, item_vo);
     }
     
     // Fill in the tag from the previous to make sure our value pair actually has it.
@@ -335,9 +337,15 @@ auto MessageIterator::range(istream& in) -> pair<MessageIterator, MessageIterato
     return make_pair(MessageIterator(in), MessageIterator());
 }
 
-auto MessageIterator::handle(bool ok) -> void {
+auto MessageIterator::handle(bool ok, int64_t group_virtual_offset, int64_t message_virtual_offset) -> void {
     if (!ok) {
-        throw runtime_error("[io::MessageIterator] obsolete, invalid, or corrupt protobuf input");
+        if (message_virtual_offset) {
+            throw runtime_error("[vg::io::MessageIterator] obsolete, invalid, or corrupt input at message " +
+                to_string(message_virtual_offset) + " group " + to_string(group_virtual_offset));
+        } else {
+            throw runtime_error("[vg::io::MessageIterator] obsolete, invalid, or corrupt input at group " +
+                to_string(group_virtual_offset));
+        }
     }
 }
 

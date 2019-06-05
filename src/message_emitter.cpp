@@ -159,6 +159,14 @@ void MessageEmitter::emit_group() {
     group_tag.clear();
 }
 
+void MessageEmitter::flush() {
+    // Make sure to emit our group, if any.
+    emit_group();
+    
+    assert(bgzip_out != nullptr);
+    bgzip_out->Flush(); 
+}
+
 }
 
 }
