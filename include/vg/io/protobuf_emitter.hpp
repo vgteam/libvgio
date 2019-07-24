@@ -48,8 +48,11 @@ using namespace std;
 template <typename T>
 class ProtobufEmitter {
 public:
-    /// Constructor
-    ProtobufEmitter(std::ostream& out, size_t max_group_size = 1000);
+    /// Constructor. Writes type-tagged Protobuf data to the given output
+    /// stream. If compress is true, data will be BGZF-compressed. The maximum
+    /// number of Protobuf messages in a tagged group is controlled by
+    /// max_group_size.
+    ProtobufEmitter(std::ostream& out, bool compress = false, size_t max_group_size = 1000);
     
     /// Destructor that finishes the file
     ~ProtobufEmitter();
@@ -136,7 +139,7 @@ std::function<void(const Item&)> emit_to(ostream& out);
 /////////
 
 template<typename T>
-ProtobufEmitter<T>::ProtobufEmitter(std::ostream& out, size_t max_group_size) : message_emitter(out, max_group_size),
+ProtobufEmitter<T>::ProtobufEmitter(std::ostream& out, bool compress, size_t max_group_size) : message_emitter(out, compress, max_group_size),
     tag(Registry::get_protobuf_tag<T>()) {
     // Make sure to write at least the tag to the file, to represent 0
     // instances of our type. When trying to load a list of our type from a

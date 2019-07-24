@@ -31,8 +31,8 @@ BlockedGzipInputStream::BlockedGzipInputStream(std::istream& stream) : handle(nu
         throw runtime_error("Unable to set up BGZF library on wrapped stream");
     }
     
-    if (file_start >= 0 && good && bgzf_compression(handle) == 2) {
-        // The stream we are wrapping is seekable, and the data is block-compressed
+    if (file_start >= 0 && good && (bgzf_compression(handle) == 2 || bgzf_compression(handle) == 0)) {
+        // The stream we are wrapping is seekable, and the data is block-compressed or uncompressed
         
         // We need to make sure BGZF knows where its blocks are starting.
     
@@ -217,8 +217,8 @@ int64_t BlockedGzipInputStream::Tell() const {
             // We need to know where the next block is
             
             // We don't have bgzf_htell so we fake it.
-            // We also manually shift the block address to the right place.
-            return htell(handle->fp) << 16;
+            // We also manually shift the block address to the right place when the offsets are virtual.
+            return handle->is_compressed ? (htell(handle->fp) << 16) : htell(handle->fp);
             
         } else {
             // Since we use the BGZF's internal cursor correctly, we can rely on its tell function.
@@ -241,6 +241,7 @@ bool BlockedGzipInputStream::Seek(int64_t virtual_offset) {
     // This will set handle->block_length to 0, so we know we need to read the block when we read next.
     if(bgzf_seek(handle, virtual_offset, SEEK_SET) == 0) {
         // The seek succeeded
+        assert(bgzf_tell(handle) == virtual_offset);
         return true;
     } else {
         // The seek failed

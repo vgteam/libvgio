@@ -40,6 +40,15 @@ public:
 
     /// We refuse to serialize individual messages longer than this size.
     const static size_t MAX_MESSAGE_SIZE = 1000000000;
+    
+    /// Sniffing function to identify if data in a C++ stream appears to be
+    /// *uncompressed* type-tagged message data, and, if so, what the tag is.
+    /// Returns the tag if it could be sniffed, or the empty string if the tag
+    /// could not be read, if the tag actually is an (illegal) empty string, or
+    /// if the tag is not valid according to the Registry. Fails with an
+    /// exception if the sniffed data cannot be ungotten.
+    /// Ungets the stream up to where it was before the sniffing read.
+    static string sniff_tag(istream& stream); 
 
     /// Constructor to wrap a stream.
     MessageIterator(istream& in);

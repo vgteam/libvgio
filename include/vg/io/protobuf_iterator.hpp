@@ -27,7 +27,6 @@ namespace io {
 
 using namespace std;
 
-
 /**
  * Refactored io::for_each function that follows the unidirectional iterator interface.
  * Also supports seeking and telling at the group level in bgzip files.

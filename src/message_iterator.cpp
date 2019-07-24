@@ -15,6 +15,80 @@ using namespace std;
 // Provide the static values a compilation unit to live in.
 const size_t MessageIterator::MAX_MESSAGE_SIZE;
 
+string MessageIterator::sniff_tag(istream& stream) {
+
+    if (!stream) {
+        // Can't read anything
+        return "";
+    }
+    
+    // Work out how many characters to try and sniff.
+    // We need a 64 bit varint, a 32 bit varint, and a max length tag.
+    // Varints are stored 7 bits to a byte.
+    // We require that our C++ STL can do this much ungetting, even though the
+    // standard guarantees absolutely no ungetting.
+    size_t to_sniff = 10 + 5 + Registry::MAX_TAG_LENGTH;
+    
+    // Allocate a buffer
+    char buffer[to_sniff];
+    // Have a cursor in the buffer
+    size_t buffer_used = 0;
+    
+    
+    while (stream.peek() != EOF && buffer_used < to_sniff) {
+        // Until we fill the buffer or would hit EOF, fill the buffer
+        buffer[buffer_used] = (char) stream.get();
+        buffer_used++;
+    }
+    
+     
+    for (size_t i = 0; i < buffer_used; i++) {
+        // Now unget all the characters again.
+        // C++11 says we can unget from EOF.
+        stream.unget();
+        if (!stream) {
+            // We did something the stream disliked.
+            throw runtime_error("Ungetting failed after " + to_string(i) + " characters");
+        }
+    }
+    
+    // Now all the characters are back in the stream.
+    
+    // Make a coded input stream stream over the data we got
+    // Default total bytes limit will be fine.
+    google::protobuf::io::CodedInputStream coded_in((::google::protobuf::uint8*) buffer, buffer_used);
+    
+    // Read a message count. 
+    size_t group_count;
+    if (!coded_in.ReadVarint64((::google::protobuf::uint64*) &group_count) || group_count < 1) {
+        // If not 1 or more, stop.
+        return "";
+    }
+    
+    // Read a tag length.
+    uint32_t tag_size;
+    if (!coded_in.ReadVarint32(&tag_size) || tag_size == 0 || tag_size > Registry::MAX_TAG_LENGTH) {
+        // If not above 0 and below some sensible limit, stop.
+        return "";
+    }
+    
+    // Read the tag data.
+    string tag;
+    if (!coded_in.ReadString(&tag, tag_size) || tag.size() != tag_size) {
+        // If we run out of buffer and don't get the right length, stop.
+        return "";
+    }
+    
+    // Check the tag with the registry.
+    if (!Registry::is_valid_tag(tag)) {
+        // If tag is not valid according to the registry, stop.
+        return "";
+    }
+    
+    // Report the tag sniffed.
+    return tag;
+}
+
 MessageIterator::MessageIterator(istream& in) : MessageIterator(unique_ptr<BlockedGzipInputStream>(new BlockedGzipInputStream(in))) {
     // Nothing to do!
 }
@@ -95,23 +169,23 @@ auto MessageIterator::operator++() -> const MessageIterator& {
         virtual_offset = bgzip_in->Tell();
         
         // The tag is prefixed by its size
-        uint32_t tagSize = 0;
-        handle(coded_in.ReadVarint32(&tagSize), group_vo);
+        uint32_t tag_size = 0;
+        handle(coded_in.ReadVarint32(&tag_size), group_vo);
         
-        if (tagSize > MAX_MESSAGE_SIZE) {
+        if (tag_size > MAX_MESSAGE_SIZE) {
             throw runtime_error("[vg::io::MessageIterator::operator++] (group " + 
                                 to_string(group_vo) + ") tag of " +
-                                to_string(tagSize) + " bytes is too long");
+                                to_string(tag_size) + " bytes is too long");
         }
         
         // Read it into the tag field of our value
         value.first.clear();
-        if (tagSize) {
-            handle(coded_in.ReadString(&value.first, tagSize), group_vo);
+        if (tag_size) {
+            handle(coded_in.ReadString(&value.first, tag_size), group_vo);
         }
         
 #ifdef debug
-        cerr << "Read what should be the tag of " << tagSize << " bytes" << endl;
+        cerr << "Read what should be the tag of " << tag_size << " bytes" << endl;
 #endif
         
         // Update the counters for the tag, which the counters treat as a message.

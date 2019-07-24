@@ -11,15 +11,25 @@ namespace io {
 
 using namespace std;
 
-MessageEmitter::MessageEmitter(ostream& out, size_t max_group_size) :
+MessageEmitter::MessageEmitter(ostream& out, bool compress, size_t max_group_size) :
     group(),
     max_group_size(max_group_size),
-    bgzip_out(new BlockedGzipOutputStream(out))
+    bgzip_out(compress ? new BlockedGzipOutputStream(out) : nullptr),
+    uncompressed_out(compress ? nullptr : new google::protobuf::io::OstreamOutputStream(&out)),
+    uncompressed_out_ostream(compress ? nullptr : &out),
+    uncompressed_out_written(0)
 {
 #ifdef debug
     cerr << "Creating MessageEmitter" << endl;
 #endif
-    if (bgzip_out->Tell() == -1) {
+
+    // GZIP magic number is: 0x1F 0x8B
+    // Protobuf varint encoding is: break into groups of 7 bits, send them out least-significant first, set high bit on all but the last.
+    // Each type-tagged message file starts with the number of items (including tag) in its group.
+    // GZIP magic number decoded like this looks like a group of 31 messages with an initial message (tag) with >=139 bytes.
+    // So as long as we enforce a tag length of < that we won't have a problem.
+    
+    if (bgzip_out.get() != nullptr && bgzip_out->Tell() == -1) {
         // Say we are starting at the beginning of the stream, if we don't know where we are.
         bgzip_out->StartFile();
     }
@@ -29,14 +39,17 @@ MessageEmitter::~MessageEmitter() {
 #ifdef debug
     cerr << "Destroying MessageEmitter" << endl;
 #endif
-    if (bgzip_out.get() != nullptr) {
+    
+    if (bgzip_out.get() != nullptr || uncompressed_out.get() != nullptr) {
 #ifdef debug
         cerr << "MessageEmitter emitting final group" << endl;
 #endif
     
         // Before we are destroyed, write stuff out.
         emit_group();
-        
+    }
+
+    if (bgzip_out.get() != nullptr) {
 #ifdef debug
         cerr << "MessageEmitter ending file" << endl;
 #endif
@@ -97,7 +110,7 @@ void MessageEmitter::emit_group() {
     
     
     // We can't write a non-empty buffer if our stream is gone/moved away
-    assert(bgzip_out.get() != nullptr);
+    assert(bgzip_out.get() != nullptr || uncompressed_out.get() != nullptr);
     
     auto handle = [](bool ok) {
         if (!ok) {
@@ -106,9 +119,11 @@ void MessageEmitter::emit_group() {
     };
 
     // Work out where the group we emit will start
-    int64_t virtual_offset = bgzip_out->Tell();
+    int64_t virtual_offset = (bgzip_out.get() != nullptr) ? bgzip_out->Tell() : (uncompressed_out_written + uncompressed_out->ByteCount());
 
-    ::google::protobuf::io::CodedOutputStream coded_out(bgzip_out.get());
+    ::google::protobuf::io::CodedOutputStream coded_out((bgzip_out.get() != nullptr) ? 
+        (::google::protobuf::io::ZeroCopyOutputStream*) bgzip_out.get() :
+        (::google::protobuf::io::ZeroCopyOutputStream*) uncompressed_out.get());
 
 #ifdef debug
     cerr << "Writing group size of " << (group.size() + 1) << endl;
@@ -144,7 +159,7 @@ void MessageEmitter::emit_group() {
     
     // Work out where we ended
     coded_out.Trim();
-    int64_t next_virtual_offset = bgzip_out->Tell();
+    int64_t next_virtual_offset = (bgzip_out.get() != nullptr) ? bgzip_out->Tell() : (uncompressed_out_written + uncompressed_out->ByteCount());
     
     for (auto& handler : group_handlers) {
         // Report the group to each group handler that is listening.
@@ -163,8 +178,18 @@ void MessageEmitter::flush() {
     // Make sure to emit our group, if any.
     emit_group();
     
-    assert(bgzip_out != nullptr);
-    bgzip_out->Flush(); 
+    assert(bgzip_out.get() != nullptr || uncompressed_out.get() != nullptr);
+    if (bgzip_out.get() != nullptr) {
+        bgzip_out->Flush();
+    }
+    if (uncompressed_out.get() != nullptr) {
+        // Remember how much was written from this stream
+        uncompressed_out_written += uncompressed_out->ByteCount();
+        // Destroy and recreate it to empty its buffer.
+        uncompressed_out.release();
+        uncompressed_out.reset(new google::protobuf::io::OstreamOutputStream(uncompressed_out_ostream));
+        
+    }
 }
 
 }

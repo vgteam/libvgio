@@ -16,6 +16,7 @@
 #include <memory>
 
 #include <google/protobuf/io/coded_stream.h>
+#include <google/protobuf/io/zero_copy_stream_impl.h>
 
 #include "blocked_gzip_output_stream.hpp"
 
@@ -28,7 +29,7 @@ using namespace std;
 /**
  * Class that wraps an output stream and allows emitting groups of binary
  * messages to it, with internal buffering. Handles finishing the file on its
- * own, and allows tracking of BGZF virtual offsets within a non-seekable
+ * own, and allows tracking of (possibly virtual) offsets within a non-seekable
  * stream (as long as the entire stream is controlled by one instance). Cannot
  * be copied, but can be moved.
  *
@@ -51,6 +52,8 @@ using namespace std;
  *
  * Not thread-safe. May be more efficient than repeated write/write_buffered
  * calls because a single BGZF stream can be used.
+ *
+ * Can write either compressed or uncompressed but framed data.
  */
 class MessageEmitter {
 public:
@@ -58,8 +61,12 @@ public:
     /// We refuse to serialize individual messages longer than this size.
     const size_t MAX_MESSAGE_SIZE = 1000000000;
 
-    /// Constructor
-    MessageEmitter(ostream& out, size_t max_group_size = 1000);
+    /// Constructor. Write output to the given stream. If compress is true,
+    /// compress it as BGZF. Limit the maximum number of messages in a group to
+    /// max_group_size.
+    ///
+    /// If not compressing, virtual offsets are just ordinary offsets. 
+    MessageEmitter(ostream& out, bool compress = false, size_t max_group_size = 1000);
     
     /// Destructor that finishes the file
     ~MessageEmitter();
@@ -107,17 +114,25 @@ public:
 
 private:
 
-    // This is our internal tag string for what is in our buffer.
-    // If it is empty, no group is buffered, because empty tags are prohibited.
+    /// This is our internal tag string for what is in our buffer.
+    /// If it is empty, no group is buffered, because empty tags are prohibited.
     string group_tag;
-    // This is our internal buffer
+    /// This is our internal buffer
     vector<string> group;
-    // This is how big we let it get before we dump it
+    /// This is how big we let it get before we dump it
     size_t max_group_size;
-    // Since Protobuf streams can't be copied or moved, we wrap ours in a uniqueptr_t so we can be moved.
+    /// This holds the BGZF output stream, if we are writing BGZF.
+    /// Since Protobuf streams can't be copied or moved, we wrap ours in a uniqueptr_t so we can be moved.
     unique_ptr<BlockedGzipOutputStream> bgzip_out;
+    /// This holds the non-BGZF output stream, if we aren't writing compressed data.
+    unique_ptr<google::protobuf::io::OstreamOutputStream> uncompressed_out;
+    /// When writing uncompressed data, we can't flush the OstreamOutputStream's internal buffer.
+    /// So we need to destroy and recreate it, so we need the ostream pointer.
+    ostream* uncompressed_out_ostream;
+    /// We need to track the total bytes written by previous OstreamOutputStreams
+    size_t uncompressed_out_written;
     
-    // If someone wants to listen in on emitted groups, they can register a handler
+    /// If someone wants to listen in on emitted groups, they can register a handler
     vector<group_listener_t> group_handlers;
 
 };

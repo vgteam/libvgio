@@ -25,17 +25,19 @@ using namespace std;
 
 /// Write the EOF marker to the given stream, so that readers won't complain that it might be truncated when they read it in.
 /// Internal EOF markers MAY exist, but a file SHOULD have exactly one EOF marker at its end.
-void finish(std::ostream& out);
+/// Needs to know if the output stream is compressed or not. Note that uncompressed streams don't actually have nonempty EOF markers.
+void finish(std::ostream& out, bool compressed);
 
 /// Write objects. count should be equal to the number of objects to write.
 /// count is written before the objects, but if it is 0, it is not written. To
 /// get the objects, calls lambda with the index of the object to retrieve. If
 /// not all objects are written, return false, otherwise true.
+/// Needs to know whether to BGZF-compress the output or not.
 template <typename T>
-bool write(std::ostream& out, size_t count, const std::function<T&(size_t)>& lambda) {
+bool write(std::ostream& out, size_t count, const std::function<T&(size_t)>& lambda, bool compressed = false) {
 
     // Wrap stream in an emitter
-    ProtobufEmitter<T> emitter(out);
+    ProtobufEmitter<T> emitter(out, compressed);
     
     for (size_t i = 0; i < count; i++) {
         // Write each item.
@@ -50,13 +52,14 @@ bool write(std::ostream& out, size_t count, const std::function<T&(size_t)>& lam
 /// get the objects, calls lambda with the index of the object to retrieve. If
 /// not all objects are written, return false, otherwise true.
 /// This implementation takes a function that returns actual objects and not references.
+/// Needs to know whether to BGZF-compress the output or not.
 template <typename T>
-bool write(std::ostream& out, size_t count, const std::function<T(size_t)>& lambda) {
+bool write(std::ostream& out, size_t count, const std::function<T(size_t)>& lambda, bool compressed = false) {
 
     static_assert(!std::is_reference<T>::value, "This write() implementation doesn't operate on references");
 
     // Wrap stream in an emitter
-    ProtobufEmitter<T> emitter(out);
+    ProtobufEmitter<T> emitter(out, compressed);
     
     for (size_t i = 0; i < count; i++) {
         // Write each item.
@@ -72,18 +75,19 @@ bool write(std::ostream& out, size_t count, const std::function<T(size_t)>& lamb
 /// Must be called with a buffer limit of 0 after all the objects have been produced, to flush the buffer.
 /// When called with a buffer limit of 0, automatically appends an EOF marker.
 /// Returns true unless an error occurs.
+/// Needs to know whether to BGZF-compress the output or not.
 template <typename T>
-bool write_buffered(std::ostream& out, std::vector<T>& buffer, size_t buffer_limit) {
+bool write_buffered(std::ostream& out, std::vector<T>& buffer, size_t buffer_limit, bool compressed = false) {
     bool wrote = false;
     if (buffer.size() >= buffer_limit) {
         std::function<T(size_t)> lambda = [&buffer](size_t n) { return buffer.at(n); };
 #pragma omp critical (stream_out)
-        wrote = write(out, buffer.size(), lambda);
+        wrote = write(out, buffer.size(), lambda, compressed);
         buffer.clear();
     }
     if (buffer_limit == 0) {
         // The session is over. Append the EOF marker.
-        finish(out);
+        finish(out, compressed);
     }
     return wrote;
 }
@@ -93,7 +97,7 @@ template <typename T>
 void write_to_file(const T& item, const string& filename) {
     ofstream out(filename);
     vector<T> items = { item };
-    write_buffered(out, items, 1);
+    write_buffered(out, items, 1, false);
     out.close();
 }
 

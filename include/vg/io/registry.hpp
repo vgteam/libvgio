@@ -141,6 +141,8 @@ public:
     
     /**
      * To help with telling messages from tags, we enforce a max tag length.
+     * If we ever allow tags of 139 bytes or longer, we risk having
+     * uncompressed files starting with the gzip magic number.
      */
     static const size_t MAX_TAG_LENGTH = 25;
     
