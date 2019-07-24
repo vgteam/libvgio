@@ -12,7 +12,6 @@ namespace io {
 
 using namespace std;
 
-
 /// Don't deal with anything smaller than a few BGZF blocks.
 const size_t StreamMultiplexer::MIN_QUEUE_ITEM_BYTES = 10 * 64 * 1024;
 
@@ -71,7 +70,7 @@ void StreamMultiplexer::register_breakpoint(size_t thread_number) {
         // We have enough data to justify a block.
         
 #ifdef debug
-    cerr << "StreamMultiplexer registered breakpoint for " << item_bytes << " bytes in thread " << thread_number << endl;
+        cerr << "StreamMultiplexer registered breakpoint for " << item_bytes << " bytes in thread " << thread_number << endl;
 #endif
         
         // Lock our queue
@@ -123,6 +122,10 @@ bool StreamMultiplexer::want_breakpoint(size_t thread_number) {
     
     // See how much data it has
     size_t item_bytes = our_stream.tellp();
+    
+#ifdef debug
+    cerr << "Checking for breakpoint at " << item_bytes << "/" << MIN_QUEUE_ITEM_BYTES << " bytes" << endl;
+#endif
     
     // Ask them to give us a break if they have enough bytes for us to ship out.
     return (item_bytes >= MIN_QUEUE_ITEM_BYTES);
@@ -223,6 +226,11 @@ void StreamMultiplexer::discard_bytes(size_t thread_number, size_t count) {
 }
 
 void StreamMultiplexer::writer_thread_function() {
+
+#ifdef debug
+    cerr << "StreamMultiplexer writer starting" << endl;
+#endif
+
 #ifdef debug
     // Track the max bytes obeserved in any queue
     size_t high_water_bytes = 0;
@@ -325,7 +333,7 @@ void StreamMultiplexer::writer_thread_function() {
     }
     
 #ifdef debug
-    cerr << "StreamMultiplexer high water mark: " << high_water_length << " items, " << high_water_bytes << " bytes" << endl;
+    cerr << "StreamMultiplexer high water mark: " << high_water_bytes << " bytes across " << thread_queues.size() << " threads" << endl;
 #endif
 }
 

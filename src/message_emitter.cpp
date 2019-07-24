@@ -121,45 +121,57 @@ void MessageEmitter::emit_group() {
     // Work out where the group we emit will start
     int64_t virtual_offset = (bgzip_out.get() != nullptr) ? bgzip_out->Tell() : (uncompressed_out_written + uncompressed_out->ByteCount());
 
-    ::google::protobuf::io::CodedOutputStream coded_out((bgzip_out.get() != nullptr) ? 
-        (::google::protobuf::io::ZeroCopyOutputStream*) bgzip_out.get() :
-        (::google::protobuf::io::ZeroCopyOutputStream*) uncompressed_out.get());
+    {
+        // Make a CodedOutput Stream that we will clean up (to flush) before we give up control.
+        ::google::protobuf::io::CodedOutputStream coded_out((bgzip_out.get() != nullptr) ? 
+            (::google::protobuf::io::ZeroCopyOutputStream*) bgzip_out.get() :
+            (::google::protobuf::io::ZeroCopyOutputStream*) uncompressed_out.get());
 
 #ifdef debug
-    cerr << "Writing group size of " << (group.size() + 1) << endl;
+        cerr << "Writing group size of " << (group.size() + 1) << endl;
 #endif
 
-    // Prefix the group with the number of objects, plus 1 for the tag header
-    coded_out.WriteVarint64(group.size() + 1);
-    handle(!coded_out.HadError());
-   
-#ifdef debug
-    cerr << "Writing tag " << group_tag << endl;
-#endif
-   
-    // Write the tag length and the tag
-    coded_out.WriteVarint32(group_tag.size());
-    handle(!coded_out.HadError());
-    coded_out.WriteRaw(group_tag.data(), group_tag.size());
-    handle(!coded_out.HadError());
-
-    for (auto& message : group) {
-        
-#ifdef debug
-        cerr << "Writing message of " << message.size() << " bytes in group of \""
-            << group_tag << "\" @ " << virtual_offset << endl;
-#endif
-        
-        // And prefix each object with its size
-        coded_out.WriteVarint32(message.size());
+        // Prefix the group with the number of objects, plus 1 for the tag header
+        coded_out.WriteVarint64(group.size() + 1);
         handle(!coded_out.HadError());
-        coded_out.WriteString(message);
+       
+#ifdef debug
+        cerr << "Writing tag " << group_tag << endl;
+#endif
+       
+        // Write the tag length and the tag
+        coded_out.WriteVarint32(group_tag.size());
         handle(!coded_out.HadError());
+        coded_out.WriteRaw(group_tag.data(), group_tag.size());
+        handle(!coded_out.HadError());
+
+        for (auto& message : group) {
+            
+#ifdef debug
+            cerr << "Writing message of " << message.size() << " bytes in group of \""
+                << group_tag << "\" @ " << virtual_offset << endl;
+#endif
+            
+            // And prefix each object with its size
+            coded_out.WriteVarint32(message.size());
+            handle(!coded_out.HadError());
+            coded_out.WriteString(message);
+            handle(!coded_out.HadError());
+        }
+        
+        coded_out.Trim();
     }
     
     // Work out where we ended
-    coded_out.Trim();
     int64_t next_virtual_offset = (bgzip_out.get() != nullptr) ? bgzip_out->Tell() : (uncompressed_out_written + uncompressed_out->ByteCount());
+    
+    if (uncompressed_out.get() != nullptr) {
+#ifdef debug
+        cerr << "Protobuf has written " << uncompressed_out->ByteCount() << " and stream has written " << uncompressed_out_ostream->tellp() << endl;
+#endif
+        // We have to have written something
+        assert(uncompressed_out->ByteCount() > 0);
+    }
     
     for (auto& handler : group_handlers) {
         // Report the group to each group handler that is listening.
@@ -180,14 +192,29 @@ void MessageEmitter::flush() {
     
     assert(bgzip_out.get() != nullptr || uncompressed_out.get() != nullptr);
     if (bgzip_out.get() != nullptr) {
+#ifdef debug
+        cerr << "Flushing MessageEmitter to BlockedGzipOutputStream" << endl;
+#endif
+
         bgzip_out->Flush();
     }
     if (uncompressed_out.get() != nullptr) {
+    
+#ifdef debug
+        cerr << "Flushing MessageEmitter to OstreamOutputStream" << endl;
+#endif
+    
         // Remember how much was written from this stream
         uncompressed_out_written += uncompressed_out->ByteCount();
         // Destroy and recreate it to empty its buffer.
-        uncompressed_out.release();
+        // Do a separate reset first to make sure only one OstreamOutputStream can be talking to the stream at a time.
+        // TODO: Probably overly cautious.
+        uncompressed_out.reset(nullptr);
         uncompressed_out.reset(new google::protobuf::io::OstreamOutputStream(uncompressed_out_ostream));
+        
+#ifdef debug
+        cerr << "Stream has written " << uncompressed_out_ostream->tellp() << endl;
+#endif
         
     }
 }
