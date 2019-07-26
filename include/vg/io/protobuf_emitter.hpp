@@ -37,6 +37,8 @@ using namespace std;
  * Note that the callbacks may be called by the ProtobufEmitter's destructor,
  * so anything they reference needs to outlive the ProtobufEmitter.
  *
+ * Writes compressed VPKG data by default.
+ *
  * May be more efficient than repeated write/write_buffered calls because a
  * single BGZF stream can be used.
  *
@@ -52,7 +54,7 @@ public:
     /// stream. If compress is true, data will be BGZF-compressed. The maximum
     /// number of Protobuf messages in a tagged group is controlled by
     /// max_group_size.
-    ProtobufEmitter(std::ostream& out, bool compress = false, size_t max_group_size = 1000);
+    ProtobufEmitter(std::ostream& out, bool compress = true, size_t max_group_size = 1000);
     
     /// Destructor that finishes the file
     ~ProtobufEmitter();
