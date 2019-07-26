@@ -26,7 +26,7 @@ using namespace std;
 /// Write the EOF marker to the given stream, so that readers won't complain that it might be truncated when they read it in.
 /// Internal EOF markers MAY exist, but a file SHOULD have exactly one EOF marker at its end.
 /// Needs to know if the output stream is compressed or not. Note that uncompressed streams don't actually have nonempty EOF markers.
-void finish(std::ostream& out, bool compressed);
+void finish(std::ostream& out, bool compressed = true);
 
 /// Write objects. count should be equal to the number of objects to write.
 /// count is written before the objects, but if it is 0, it is not written. To
@@ -34,7 +34,7 @@ void finish(std::ostream& out, bool compressed);
 /// not all objects are written, return false, otherwise true.
 /// Needs to know whether to BGZF-compress the output or not.
 template <typename T>
-bool write(std::ostream& out, size_t count, const std::function<T&(size_t)>& lambda, bool compressed = false) {
+bool write(std::ostream& out, size_t count, const std::function<T&(size_t)>& lambda, bool compressed = true) {
 
     // Wrap stream in an emitter
     ProtobufEmitter<T> emitter(out, compressed);
@@ -54,7 +54,7 @@ bool write(std::ostream& out, size_t count, const std::function<T&(size_t)>& lam
 /// This implementation takes a function that returns actual objects and not references.
 /// Needs to know whether to BGZF-compress the output or not.
 template <typename T>
-bool write(std::ostream& out, size_t count, const std::function<T(size_t)>& lambda, bool compressed = false) {
+bool write(std::ostream& out, size_t count, const std::function<T(size_t)>& lambda, bool compressed = true) {
 
     static_assert(!std::is_reference<T>::value, "This write() implementation doesn't operate on references");
 
@@ -77,7 +77,7 @@ bool write(std::ostream& out, size_t count, const std::function<T(size_t)>& lamb
 /// Returns true unless an error occurs.
 /// Needs to know whether to BGZF-compress the output or not.
 template <typename T>
-bool write_buffered(std::ostream& out, std::vector<T>& buffer, size_t buffer_limit, bool compressed = false) {
+bool write_buffered(std::ostream& out, std::vector<T>& buffer, size_t buffer_limit, bool compressed = true) {
     bool wrote = false;
     if (buffer.size() >= buffer_limit) {
         std::function<T(size_t)> lambda = [&buffer](size_t n) { return buffer.at(n); };
