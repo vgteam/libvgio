@@ -62,11 +62,17 @@ add_dependencies(vgio_static link_target)
 add_library(VGio::vgio ALIAS vgio)
 
 # Set target properties
+
+# If we pass exactly ${HTSlib_INCLUDEDIR} or ${Protobuf_INCLUDEDIR} they manage
+# to get filtered out somehow and they aren't passed as -I optiosn to the
+# compiler. So we throw a /. on the end.
 target_include_directories(vgio
     PUBLIC
         $<INSTALL_INTERFACE:include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}> # Capture the Protobuf generated header that lands here.
+        ${HTSlib_INCLUDEDIR}/.
+        ${Protobuf_INCLUDEDIR}/.
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
@@ -75,6 +81,8 @@ target_include_directories(vgio_static
         $<INSTALL_INTERFACE:include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}> # Capture the Protobuf generated header that lands here.
+        ${HTSlib_INCLUDEDIR}/.
+        ${Protobuf_INCLUDEDIR}/.
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )

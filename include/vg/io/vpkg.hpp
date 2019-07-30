@@ -131,36 +131,63 @@ public:
             // We can't open the file; return an empty pointer.
             return unique_ptr<Wanted>();
         }
-    
-        // Check if the thing we want can be loaded from a bare stream
-        auto* bare_loader = Registry::find_bare_loader<Wanted>();
         
-#ifdef debug
-        cerr << "Bare loader for " << describe<Wanted>() << ": " << bare_loader << endl;
-#endif
-        
-        if (bare_loader != nullptr) {
-        
-            // If so, sniff out whether this is actually a BGZF-compressed
-            // type-tagged message file.
-            
-            if (!BlockedGzipInputStream::SmellsLikeGzip(in)) {
-#ifdef debug
-                cerr << "Data does not smell compressed; try loading with the bare loader" << endl;
-#endif
-                // If it is not GZIP-compressed, try loading it directly with the loader.
-                return unique_ptr<Wanted>((Wanted*)(*bare_loader)(in));
-            }
+        if (!BlockedGzipInputStream::SmellsLikeGzip(in)) {
+            // This isn't compressed. It might be a bare file, empty, or uncompressed data.
             
             // TODO: We assume that if it starts with the GZIP magic number
             // (0x1F 0x8B) it is GZIP'd (possibly BGZF) type-tagged message
             // data. For some of our old formats that didn't include their own
-            // leading magic numbers (GCSA, LCP), this assumption may break
-            // down for some files!
+            // leading magic numbers (GCSA, LCP), this may not be true!
             
+            // It's not safe to try and sniff the tag unless the stream is seekable and we can back up.
+            // For unseekable streams we assume we have VPKG data. For seekable ones we support bare loaders as well.
+            
+            // Check if the thing we want can be loaded from a bare stream
+            auto* bare_loader = Registry::find_bare_loader<Wanted>();
+            
+#ifdef debug
+            cerr << "Bare loader for " << describe<Wanted>() << ": " << bare_loader << endl;
+#endif
+            
+            if (bare_loader != nullptr) {
+                // Bare load is possible. See if we have a seekable stream to try it on.
+                in.clear();
+                auto in_position = in.tellg();
+                bool in_good = in.good();
+                in.clear();
+            
+                if (in_position >= 0 && in_good) {
+                    // Stream porbably supports enough unget to sniff for a
+                    // tag, so we can decide if the bare loader is correct to
+                    // use.
+                    
+                    if (MessageIterator::sniff_tag(in).empty()) {
+                        // This isn't uncompressed tagged data. It could be empty or it
+                        // could be something in a bespoke format.
+                        
+#ifdef debug
+                        cerr << "Try loading with the bare loader" << endl;
+#endif
+                        // If it is not GZIP-compressed, try loading it directly with the loader.
+                        return unique_ptr<Wanted>((Wanted*)(*bare_loader)(in));
+                        
+                        // If there's no bare loader, just keep going and feed the
+                        // (possibly empty or broken) file into our real error-handling
+                        // read code. 
+                            
+                    }
+                }
+            }
         }
         
-        // If it is compressed, or we don't have a loader from a bare stream, then make the MessageIterator.
+        // If we get here, either it is GZIP-compressed, or there is no bare
+        // loader, or the inout stream is unseekable (so we can't sniff to see
+        // if we want to use the bare loader), or the stream is seekable and we
+        // sniffed and it looks like uncompressed VPKG with a valid tag.
+        //
+        // We want to proceed with making a MessageIterator and using its error
+        // reporting to diagnose any problems with the file.
         MessageIterator it(in);
         
 #ifdef debug
