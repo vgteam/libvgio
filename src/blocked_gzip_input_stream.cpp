@@ -52,6 +52,7 @@ BlockedGzipInputStream::~BlockedGzipInputStream() {
 }
 
 bool BlockedGzipInputStream::Next(const void** data, int* size) {
+
     if (handle->block_length != 0 && handle->block_offset != handle->block_length) {
         // We aren't just after a seek, but we also aren't at the end of a block. We backed up.
         
@@ -76,10 +77,10 @@ bool BlockedGzipInputStream::Next(const void** data, int* size) {
     } else {
         // We need new data. Either we did a seek, or we are at the end of the previous block.
         
-        if (bgzf_compression(handle) != 2) {
-            // We're not BGZF compressed. bgzf_read_block only resets the
-            // block_offset (when not seeking) for BGZF files. We have to do it
-            // manually.
+        if (bgzf_compression(handle) == 1) {
+            // We're unblocked gzip compressed. bgzf_read_block does not reset
+            // the block offset at the end of a block for these files. We have
+            // to do it manually.
             handle->block_offset = 0;
         }
         
@@ -169,6 +170,7 @@ void BlockedGzipInputStream::BackUp(int count) {
 #ifdef debug
     cerr << "Back up " << count << " bytes to " << handle->block_offset << "/" << handle->block_length << endl;
 #endif
+
 }
 
 bool BlockedGzipInputStream::Skip(int count) {
@@ -217,8 +219,8 @@ int64_t BlockedGzipInputStream::Tell() const {
             // We need to know where the next block is
             
             // We don't have bgzf_htell so we fake it.
-            // We also manually shift the block address to the right place when the offsets are virtual.
-            return handle->is_compressed ? (htell(handle->fp) << 16) : htell(handle->fp);
+            // We also manually shift the block address to the right place 
+            return htell(handle->fp) << 16;
             
         } else {
             // Since we use the BGZF's internal cursor correctly, we can rely on its tell function.
@@ -241,7 +243,6 @@ bool BlockedGzipInputStream::Seek(int64_t virtual_offset) {
     // This will set handle->block_length to 0, so we know we need to read the block when we read next.
     if(bgzf_seek(handle, virtual_offset, SEEK_SET) == 0) {
         // The seek succeeded
-        assert(bgzf_tell(handle) == virtual_offset);
         return true;
     } else {
         // The seek failed
