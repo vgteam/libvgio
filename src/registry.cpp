@@ -324,8 +324,6 @@ auto wrap_bare_saver(function<void(const void*, ostream&)> ostream_saver) -> sav
     };
 }
 
-
-
 }
 
 }
