@@ -140,6 +140,15 @@ public:
     static void register_bare_loader_saver(const string& tag, bare_load_function_t loader, bare_save_function_t saver);
     
     /**
+     * Like register_bare_loader_saver(), except that additionally the function
+     * will be used when attempting to load any of the base classes when the
+     * file begins with the specified magic bytes.
+     */
+    template<typename Handled, typename... Bases>
+    static void register_bare_loader_saver_with_magic(const string& tag, const string& magic,
+        bare_load_function_t loader, bare_save_function_t saver);
+    
+    /**
      * To help with telling messages from tags, we enforce a max tag length.
      * If we ever allow tags of 139 bytes or longer, we risk having
      * uncompressed files starting with the gzip magic number.
@@ -183,13 +192,15 @@ public:
     static const load_function_t* find_loader(const string& tag);
     
     /**
-     * Look up the appropriate loader function to use to load an object of the
-     * given type from a bare stream. If there is one registered, return a
-     * pointer to it. The caller has to call it and cast the result to the
-     * right type. If there isn't, returns nullptr.
+     * Look up the appropriate loader functions to use to load an object of the
+     * given type from a bare stream. If there are any registered, return a
+     * pointer to a vector of functions and their possibly empty stream
+     * prefixes that they require. The caller has to call the appropriate
+     * function and and cast the result to the right type. If there are no
+     * functions available, returns nullptr.
      */
     template<typename Want>
-    static const bare_load_function_t* find_bare_loader();
+    static const vector<pair<bare_load_function_t, string>>* find_bare_loaders();
     
     /**
      * Look up the appropriate saver function to use to save an object of the
@@ -218,9 +229,9 @@ private:
         unordered_map<type_index, pair<string, save_function_t>> type_to_saver;
         
         /// Maps from type_index we want to load from a old,
-        /// non-tagged-message-format file to a "bare" loader taht can load the
-        /// desired thing from an istream.
-        unordered_map<type_index, bare_load_function_t> type_to_bare_loader;
+        /// non-tagged-message-format file to a list of "bare" loaders that can load the
+        /// desired thing from an istream, and their possibly empty required prefixes.
+        unordered_map<type_index, vector<pair<bare_load_function_t, string>>> type_to_bare_loaders;
     };
     
     /**
@@ -244,12 +255,12 @@ private:
     static void register_loader(const string& tag, load_function_t loader);
     
     /**
-     * Register a load function for loading a type from non-type-tagged-message
-     * "bare" streams. Can only work on a single preselected type when loading
-     * from a bare stream.
+     * Register a load function for loading the given types from
+     * non-type-tagged-message "bare" streams witht he given possibly empty
+     * prefix, which is retained in the stream data. 
      */
-    template<typename Handled>
-    static void register_bare_loader(bare_load_function_t loader);
+    template<typename Handled, typename... Bases>
+    static void register_bare_loader(bare_load_function_t loader, const string& prefix = "");
     
     /**
      * Register a save function to save a type with a given tag. The empty tag
@@ -257,6 +268,7 @@ private:
      */
     template<typename Handled>
     static void register_saver(const string& tag, save_function_t saver);
+    
 };
 
 /////////////
@@ -296,13 +308,17 @@ void Registry::register_loader(const string& tag, load_function_t loader) {
     std::vector<load_function_t> dummy{(tables.tag_to_loader[tag][type_index(typeid(Bases))] = loader)...};
 }
 
-template<typename Handled>
-void Registry::register_bare_loader(bare_load_function_t loader) {
+template<typename Handled, typename... Bases>
+void Registry::register_bare_loader(bare_load_function_t loader, const string& prefix) {
     // Get our state
     Tables& tables = get_tables();
     
-    // Save the function in the table
-    tables.type_to_bare_loader.emplace(type_index(typeid(Handled)), loader);
+    // Save the loading function to load the given type
+    tables.type_to_bare_loaders[type_index(typeid(Handled))].emplace_back(loader, prefix);
+
+    // And for the base classes.
+    // Expand over all the base types in an initializer list and use an assignment expression to fill a dummy vector.
+    std::vector<int> dummy{(tables.type_to_bare_loaders[type_index(typeid(Bases))].emplace_back(loader, prefix), 0)...};
 }
 
 template<typename Handled>
@@ -356,7 +372,19 @@ void Registry::register_bare_loader_saver(const string& tag, bare_load_function_
     register_loader_saver<Handled, Bases...>(tag, wrap_bare_loader(loader), wrap_bare_saver(saver));
     
     // Register the bare stream loader
-    register_bare_loader<Handled>(loader);
+    register_bare_loader<Handled>(loader, "");
+
+}
+
+template<typename Handled, typename... Bases>
+void Registry::register_bare_loader_saver_with_magic(const string& tag, const string& magic,
+    bare_load_function_t loader, bare_save_function_t saver) {
+
+    // Register the type-tagged wrapped functions
+    register_loader_saver<Handled, Bases...>(tag, wrap_bare_loader(loader), wrap_bare_saver(saver));
+    
+    // Register the bare stream loader
+    register_bare_loader<Handled, Bases...>(loader, magic);
 
 }
 
@@ -390,19 +418,19 @@ const load_function_t* Registry::find_loader(const string& tag) {
 }
 
 template<typename Want>
-const bare_load_function_t* Registry::find_bare_loader() {
+const vector<pair<bare_load_function_t, string>>* Registry::find_bare_loaders() {
     // Get our state
     Tables& tables = get_tables();
     
     // Look for a loader for this type from bare streams
-    auto found = tables.type_to_bare_loader.find(type_index(typeid(Want)));
+    auto found = tables.type_to_bare_loaders.find(type_index(typeid(Want)));
     
-    if (found != tables.type_to_bare_loader.end()) {
-        // We found one. Return a pointer to it.
+    if (found != tables.type_to_bare_loaders.end() && !found->second.empty()) {
+        // We found one or more loaders
         return &found->second;
     }
     
-    // We don't have a loader to load this from a bare file.
+    // We don't have any loaders to load this from a bare file.
     return nullptr;
 }
     

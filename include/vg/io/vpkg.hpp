@@ -143,15 +143,24 @@ public:
             // It's not safe to try and sniff the tag unless the stream is seekable and we can back up.
             // For unseekable streams we assume we have VPKG data. For seekable ones we support bare loaders as well.
             
-            // Check if the thing we want can be loaded from a bare stream
-            auto* bare_loader = Registry::find_bare_loader<Wanted>();
+            // Check if the thing we want can be loaded from a bare stream, and
+            // if so what functions do it and what prefixes they require.
+            auto* bare_loaders = Registry::find_bare_loaders<Wanted>();
             
 #ifdef debug
-            cerr << "Bare loader for " << describe<Wanted>() << ": " << bare_loader << endl;
+            cerr << "Bare loaders for " << describe<Wanted>() << ": " << bare_loaders << endl;
 #endif
             
-            if (bare_loader != nullptr) {
-                // Bare load is possible. See if we have a seekable stream to try it on.
+            if (bare_loaders != nullptr) {
+                // Bare load is possible, if we have the righht prefix.
+                
+#ifdef debug
+                for (auto& loader_and_prefix : *bare_loaders) {
+                    cerr << "Can load from prefix: " << loader_and_prefix.second << endl;
+                }
+#endif
+                
+                // See if we have a seekable stream to try it on.
                 in.clear();
                 auto in_position = in.tellg();
                 bool in_good = in.good();
@@ -162,19 +171,37 @@ public:
                     // tag, so we can decide if the bare loader is correct to
                     // use.
                     
-                    if (MessageIterator::sniff_tag(in).empty()) {
+#ifdef debug
+                    cerr << "Sniffing tag from stream" << endl;
+#endif
+                    
+                    string sniffed_tag = MessageIterator::sniff_tag(in);
+                    
+#ifdef debug
+                    cerr << "Sniffed tag: " << sniffed_tag << endl;
+#endif
+                    
+                    if (sniffed_tag.empty()) {
                         // This isn't uncompressed tagged data. It could be empty or it
                         // could be something in a bespoke format.
                         
-#ifdef debug
-                        cerr << "Try loading with the bare loader" << endl;
-#endif
-                        // If it is not GZIP-compressed, try loading it directly with the loader.
-                        return unique_ptr<Wanted>((Wanted*)(*bare_loader)(in));
+                        for (auto& loader_and_prefix : *bare_loaders) {
+                            // Just linear scan through all the loaders
                         
-                        // If there's no bare loader, just keep going and feed the
-                        // (possibly empty or broken) file into our real error-handling
-                        // read code. 
+#ifdef debug
+                            cerr << "Try loading with the bare loader for prefix " << loader_and_prefix.second << endl;
+#endif
+                            
+                            if (sniff_magic(in, loader_and_prefix.second)) {
+                                // Use the first prefix we find.
+                                // Up to the user to avoid prefix overlap.
+                                return unique_ptr<Wanted>((Wanted*)(loader_and_prefix.first)(in));
+                            }
+                        }
+                        
+                        // If there's no matching bare loader, just keep going
+                        // and feed the (possibly empty or broken) file into
+                        // our real error-handling read code. 
                             
                     }
                 }
@@ -546,6 +573,13 @@ private:
     static typename std::enable_if<!std::is_default_constructible<T>::value, unique_ptr<T>>::type make_default_or_null() {
         return unique_ptr<T>(nullptr);
     }
+    
+    /**
+     * Return true of the given stream starts with the given magic number
+     * prefix, and false otherwise. Returns the stream to its initial position
+     * regardless of the result.
+     */
+    static bool sniff_magic(istream& stream, const string& magic);
 };
 
 }

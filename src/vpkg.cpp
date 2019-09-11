@@ -26,6 +26,58 @@ void VPKG::with_save_stream(ostream& to, const string& tag, const function<void(
     });
 }
 
+bool VPKG::sniff_magic(istream& stream, const string& magic) {
+
+    if (!stream) {
+        // Can't read anything
+        return "";
+    }
+    
+    // Work out how many characters to try and sniff.
+    // We require that our C++ STL can do this much ungetting, even though the
+    // standard guarantees absolutely no ungetting.
+    size_t to_sniff = magic.size();
+    
+    // Allocate a buffer
+    char buffer[to_sniff];
+    // Have a cursor in the buffer
+    size_t buffer_used = 0;
+    
+    while (stream.peek() != EOF && buffer_used < to_sniff) {
+        // Until we fill the buffer or would hit EOF, fill the buffer
+        buffer[buffer_used] = (char) stream.get();
+        buffer_used++;
+    }
+     
+    for (size_t i = 0; i < buffer_used; i++) {
+        // Now unget all the characters again.
+        // C++11 says we can unget from EOF.
+        stream.unget();
+        if (!stream) {
+            // We did something the stream disliked.
+            throw runtime_error("Ungetting failed after " + to_string(i) + " characters");
+        }
+    }
+    
+    // Now all the characters are back in the stream.
+    
+    if (buffer_used < magic.size()) {
+        // We ran out of data
+        return false;
+    }
+    
+    for (size_t i = 0; i < buffer_used; i++) {
+        // Check each character
+        if (buffer[i] != magic[i]) {
+            // And on a mismatch, fail
+            return false;
+        }
+    }
+    
+    // If we get ehre, there were no mismatches
+    return true;
+}
+
 }
 
 }
