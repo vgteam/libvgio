@@ -126,16 +126,17 @@ void for_each(std::istream& in,
 // elements of each pair are in order, but the overall order in which lambda2
 // is invoked on pairs is undefined (concurrent). lambda1 is invoked on an odd
 // last element of the stream, if any.
+// objects will be handed off to worker threads in batches of "batch_size" which
+// must be divisible by 2.
+
 template <typename T>
 void for_each_parallel_impl(std::istream& in,
                             const std::function<void(T&,T&)>& lambda2,
                             const std::function<void(T&)>& lambda1,
-                            const std::function<bool(void)>& single_threaded_until_true) {
+                            const std::function<bool(void)>& single_threaded_until_true,
+                            const size_t batch_size) {
 
-    // objects will be handed off to worker threads in batches of this many
-    // Must be divisible by 2.
-    const size_t batch_size = 256;
-    static_assert(batch_size % 2 == 0, "io::for_each_parallel::batch_size must be even");
+    assert(batch_size % 2 == 0); //for_each_parallel::batch_size must be even
     // max # of such batches to be holding in memory
     size_t max_batches_outstanding = 256;
     // max # we will ever increase the batch buffer to
@@ -283,31 +284,34 @@ void for_each_parallel_impl(std::istream& in,
 // parallel iteration over interleaved pairs of elements; error out if there's an odd number of elements
 template <typename T>
 void for_each_interleaved_pair_parallel(std::istream& in,
-                                        const std::function<void(T&,T&)>& lambda2) {
+                                        const std::function<void(T&,T&)>& lambda2,
+                                        size_t batch_size = 256) {
     std::function<void(T&)> err1 = [](T&){
         throw std::runtime_error("io::for_each_interleaved_pair_parallel: expected input stream of interleaved pairs, but it had odd number of elements");
     };
     std::function<bool(void)> no_wait = [](void) {return true;};
-    for_each_parallel_impl(in, lambda2, err1, no_wait);
+    for_each_parallel_impl(in, lambda2, err1, no_wait, batch_size);
 }
     
 template <typename T>
 void for_each_interleaved_pair_parallel_after_wait(std::istream& in,
                                                    const std::function<void(T&,T&)>& lambda2,
-                                                   const std::function<bool(void)>& single_threaded_until_true) {
+                                                   const std::function<bool(void)>& single_threaded_until_true,
+                                                   size_t batch_size = 256) {
     std::function<void(T&)> err1 = [](T&){
         throw std::runtime_error("io::for_each_interleaved_pair_parallel: expected input stream of interleaved pairs, but it had odd number of elements");
     };
-    for_each_parallel_impl(in, lambda2, err1, single_threaded_until_true);
+    for_each_parallel_impl(in, lambda2, err1, single_threaded_until_true, batch_size);
 }
 
 // parallelized for each individual element
 template <typename T>
 void for_each_parallel(std::istream& in,
-                       const std::function<void(T&)>& lambda1) {
+                       const std::function<void(T&)>& lambda1,
+                       size_t batch_size = 256) {
     std::function<void(T&,T&)> lambda2 = [&lambda1](T& o1, T& o2) { lambda1(o1); lambda1(o2); };
     std::function<bool(void)> no_wait = [](void) {return true;};
-    for_each_parallel_impl(in, lambda2, lambda1, no_wait);
+    for_each_parallel_impl(in, lambda2, lambda1, no_wait, batch_size);
 }
 
 }
