@@ -4,6 +4,9 @@ project(libvgio VERSION 0.0.0 LANGUAGES CXX)
 # Optimize by default, but also include debug info
 set(CMAKE_CXX_FLAGS "-O3 -g")
 
+# Use C++14, so that Protobuf headers that use lambdas will work.
+set(CMAKE_CXX_STANDARD 14)
+
 # Declare dependencies and explain how to find them
 find_package(PkgConfig REQUIRED)
 
