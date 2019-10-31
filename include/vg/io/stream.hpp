@@ -134,7 +134,7 @@ void for_each_parallel_impl(std::istream& in,
                             const std::function<void(T&,T&)>& lambda2,
                             const std::function<void(T&)>& lambda1,
                             const std::function<bool(void)>& single_threaded_until_true,
-                            const size_t batch_size) {
+                            size_t batch_size) {
 
     assert(batch_size % 2 == 0); //for_each_parallel::batch_size must be even
     // max # of such batches to be holding in memory
@@ -150,7 +150,7 @@ void for_each_parallel_impl(std::istream& in,
 
     // this loop handles a chunked file with many pieces
     // such as we might write in a multithreaded process
-    #pragma omp parallel default(none) shared(in, lambda1, lambda2, batches_outstanding, max_batches_outstanding, single_threaded_until_true, cerr)
+    #pragma omp parallel default(none) shared(in, lambda1, lambda2, batches_outstanding, max_batches_outstanding, single_threaded_until_true, cerr, batch_size)
     #pragma omp single
     {
         auto handle = [](bool retval) -> void {
@@ -231,7 +231,7 @@ void for_each_parallel_impl(std::istream& in,
 #endif
                 
                     // spawn a task in another thread to process this batch
-#pragma omp task default(none) firstprivate(batch) shared(batches_outstanding, lambda2, handle, single_threaded_until_true, cerr)
+#pragma omp task default(none) firstprivate(batch) shared(batches_outstanding, lambda2, handle, single_threaded_until_true, cerr, batch_size)
                     {
 #ifdef debug
                         cerr << "Batch task is running" << endl;
