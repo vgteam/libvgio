@@ -147,6 +147,23 @@ public:
     template<typename Handled, typename... Bases>
     static void register_bare_loader_saver_with_magic(const string& tag, const string& magic,
         bare_load_function_t loader, bare_save_function_t saver);
+        
+    /**
+     * Register a load function for a tag. The empty tag means it can run on
+     * untagged message groups. If any Bases are passed, we will use this
+     * loader to load when one of those types is requested and this tag is
+     * encountered.
+     */
+    template<typename Handled, typename... Bases>
+    static void register_loader(const string& tag, load_function_t loader);
+    
+    /**
+     * Register a loading function for the given collection of tags. If ""
+     * appears in the list of tags, the loader can be deployed on untagged
+     * message groups (for backward compatibility).
+     */
+    template<typename Handled, typename... Bases>
+    static void register_loader(const std::vector<std::string>& tags, load_function_t loader);
     
     /**
      * To help with telling messages from tags, we enforce a max tag length.
@@ -246,15 +263,6 @@ private:
     static ::google::protobuf::util::TypeResolver& get_resolver();
     
     /**
-     * Register a load function for a tag. The empty tag means it can run on
-     * untagged message groups. If any Bases are passed, we will use this
-     * loader to load when one of those types is requested and this tag is
-     * encountered.
-     */
-    template<typename Handled, typename... Bases>
-    static void register_loader(const string& tag, load_function_t loader);
-    
-    /**
      * Register a load function for loading the given types from
      * non-type-tagged-message "bare" streams witht he given possibly empty
      * prefix, which is retained in the stream data. 
@@ -306,6 +314,16 @@ void Registry::register_loader(const string& tag, load_function_t loader) {
     // And for the base classes.
     // Expand over all the base types in an initializer list and use an assignment expression to fill a dummy vector.
     std::vector<load_function_t> dummy{(tables.tag_to_loader[tag][type_index(typeid(Bases))] = loader)...};
+}
+
+template<typename Handled, typename... Bases>
+void Registry::register_loader(const std::vector<std::string>& tags, load_function_t loader) {
+    // There must be tags
+    assert(!tags.empty());
+
+    for (auto& tag : tags) {
+        register_loader<Handled, Bases...>(tag, loader);
+    }
 }
 
 template<typename Handled, typename... Bases>
