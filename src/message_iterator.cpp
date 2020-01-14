@@ -89,6 +89,57 @@ string MessageIterator::sniff_tag(istream& stream) {
     return tag;
 }
 
+string MessageIterator::sniff_tag(::google::protobuf::io::ZeroCopyInputStream& stream) {
+
+    // Get the buffer of data available.
+    char* buffer = nullptr;
+    // And the number of bytes in it.
+    int did_sniff = 0;
+    if (!stream.Next((const void**)&buffer, &did_sniff)) {
+        // Could not read anything.
+        return "";
+    }
+
+    // Make a coded input stream stream over the data we got
+    // Default total bytes limit will be fine.
+    google::protobuf::io::CodedInputStream coded_in((::google::protobuf::uint8*) buffer, did_sniff);
+    
+    // Read a message count. 
+    size_t group_count;
+    if (!coded_in.ReadVarint64((::google::protobuf::uint64*) &group_count) || group_count < 1) {
+        // If not 1 or more, stop.
+        stream.BackUp(did_sniff);
+        return "";
+    }
+    
+    // Read a tag length.
+    uint32_t tag_size;
+    if (!coded_in.ReadVarint32(&tag_size) || tag_size == 0 || tag_size > Registry::MAX_TAG_LENGTH) {
+        // If not above 0 and below some sensible limit, stop.
+        stream.BackUp(did_sniff);
+        return "";
+    }
+    
+    // Read the tag data.
+    string tag;
+    if (!coded_in.ReadString(&tag, tag_size) || tag.size() != tag_size) {
+        // If we run out of buffer and don't get the right length, stop.
+        stream.BackUp(did_sniff);
+        return "";
+    }
+    
+    // Check the tag with the registry.
+    if (!Registry::is_valid_tag(tag)) {
+        // If tag is not valid according to the registry, stop.
+        stream.BackUp(did_sniff);
+        return "";
+    }
+    
+    // Report the tag sniffed.
+    stream.BackUp(did_sniff);
+    return tag;
+}
+
 MessageIterator::MessageIterator(istream& in) : MessageIterator(unique_ptr<BlockedGzipInputStream>(new BlockedGzipInputStream(in))) {
     // Nothing to do!
 }
