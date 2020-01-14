@@ -29,8 +29,8 @@ void VPKG::with_save_stream(ostream& to, const string& tag, const function<void(
 bool VPKG::sniff_magic(istream& stream, const string& magic) {
 
     if (!stream) {
-        // Can't read anything
-        return "";
+        // Can't read anything, so obviously it can't match.
+        return false;
     }
     
     // Work out how many characters to try and sniff.
@@ -48,7 +48,7 @@ bool VPKG::sniff_magic(istream& stream, const string& magic) {
         buffer[buffer_used] = (char) stream.get();
         buffer_used++;
     }
-     
+
     for (size_t i = 0; i < buffer_used; i++) {
         // Now unget all the characters again.
         // C++11 says we can unget from EOF.
@@ -61,6 +61,13 @@ bool VPKG::sniff_magic(istream& stream, const string& magic) {
     
     // Now all the characters are back in the stream.
     
+    if (!stream) {
+        // We reached EOF when sniffing the magic. We managed to unget
+        // everything (maybe the file is empty). But we need to clear errors on
+        // the stream so it is like it was when we started.
+        stream.clear();
+    }
+
     if (buffer_used < magic.size()) {
         // We ran out of data
         return false;
@@ -74,7 +81,7 @@ bool VPKG::sniff_magic(istream& stream, const string& magic) {
         }
     }
     
-    // If we get ehre, there were no mismatches
+    // If we get here, there were no mismatches
     return true;
 }
 
