@@ -149,6 +149,15 @@ public:
         bare_load_function_t loader, bare_save_function_t saver);
         
     /**
+     * Like register_bare_loader_saver(), except that additionally the function
+     * will be used when attempting to load any of the base classes when the
+     * file begins with any of the the specified magic byte sequences.
+     */
+    template<typename Handled, typename... Bases>
+    static void register_bare_loader_saver_with_magics(const string& tag, const vector<string>& magics,
+        bare_load_function_t loader, bare_save_function_t saver);
+        
+    /**
      * Register a load function for a tag. The empty tag means it can run on
      * untagged message groups. If any Bases are passed, we will use this
      * loader to load when one of those types is requested and this tag is
@@ -398,12 +407,22 @@ template<typename Handled, typename... Bases>
 void Registry::register_bare_loader_saver_with_magic(const string& tag, const string& magic,
     bare_load_function_t loader, bare_save_function_t saver) {
 
+    // Register with just one magic
+    register_bare_loader_saver_with_magics<Handled, Bases...>(tag, vector<string>({magic}), loader, saver);
+
+}
+
+template<typename Handled, typename... Bases>
+void Registry::register_bare_loader_saver_with_magics(const string& tag, const vector<string>& magics,
+    bare_load_function_t loader, bare_save_function_t saver) {
+
     // Register the type-tagged wrapped functions
     register_loader_saver<Handled, Bases...>(tag, wrap_bare_loader(loader), wrap_bare_saver(saver));
     
-    // Register the bare stream loader
-    register_bare_loader<Handled, Bases...>(loader, magic);
-
+    for (auto& magic : magics) {
+        // Register the bare stream loader for each magic
+        register_bare_loader<Handled, Bases...>(loader, magic);
+    }
 }
 
 template<typename Want>
