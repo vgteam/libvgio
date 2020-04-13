@@ -9,9 +9,10 @@ instructions on how to use it are subject to change.
 
 libvgio is implemented in C++11 and is built using CMake.
 
-libvgio's only dependency is protobuf
-([Google Protocol Buffers](https://developers.google.com/protocol-buffers/)) and
-pthreads, both of which can be easily installed on any Unix style system.
+libvgio's only dependencies are protobuf
+([Google Protocol Buffers](https://developers.google.com/protocol-buffers/)),
+[htslib](https://www.htslib.org/), and pthreads, all of which can be easily
+installed on any Unix style system.
 
 Once protobufs and pthreads are installed, you can build and install libvgio
 by running the installation script: `./install.sh [INSTALL_LOCATION]`.
