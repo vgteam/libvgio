@@ -14,6 +14,8 @@ libvgio's only dependencies are protobuf
 [htslib](https://www.htslib.org/), and pthreads, all of which can be easily
 installed on any Unix style system.
 
+**libvgio requires htslib 1.10 or greater** to avoid [a bug in htslib that truncates multi-member GZIP files after the first member](https://github.com/samtools/htslib/issues/742). If you build against an older htslib, you will not be able to read all VG and GAM files properly, especially GraphAligner GAMs.
+
 Once protobufs and pthreads are installed, you can build and install libvgio
 by running the installation script: `./install.sh [INSTALL_LOCATION]`.
 This will install the dynamic library and headers in your home directory unless
