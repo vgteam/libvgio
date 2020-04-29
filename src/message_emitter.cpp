@@ -11,6 +11,9 @@ namespace io {
 
 using namespace std;
 
+// Give the static member variable a .o home
+const size_t MessageEmitter::MAX_MESSAGE_SIZE = 1000000000;
+
 MessageEmitter::MessageEmitter(ostream& out, bool compress, size_t max_group_size) :
     group(),
     max_group_size(max_group_size),

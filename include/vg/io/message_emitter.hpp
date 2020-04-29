@@ -59,7 +59,7 @@ class MessageEmitter {
 public:
 
     /// We refuse to serialize individual messages longer than this size.
-    const size_t MAX_MESSAGE_SIZE = 1000000000;
+    const static size_t MAX_MESSAGE_SIZE;
 
     /// Constructor. Write output to the given stream. If compress is true,
     /// compress it as BGZF. Limit the maximum number of messages in a group to
