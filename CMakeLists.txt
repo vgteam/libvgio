@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.9)
 project(libvgio VERSION 0.0.0 LANGUAGES CXX)
 
 # Optimize by default, but also include debug info
-set(CMAKE_CXX_FLAGS "-O3 -g")
+set(CMAKE_CXX_FLAGS "-O3 -g ${CMAKE_CXX_FLAGS}")
 
 # Use C++14, so that Protobuf headers that use lambdas will work.
 set(CMAKE_CXX_STANDARD 14)
