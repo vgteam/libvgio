@@ -23,6 +23,17 @@ find_package(Threads REQUIRED)
 # Find HTSlib. We find it with pkg-config, so it has static and dynamic libs by default.
 pkg_check_modules(HTSlib REQUIRED htslib)
 
+# Add external projects
+include(${CMAKE_ROOT}/Modules/ExternalProject.cmake)
+
+# libhandlegraph (full build using its cmake config)
+ExternalProject_Add(handlegraph
+  SOURCE_DIR "${CMAKE_SOURCE_DIR}/deps/libhandlegraph"
+  CMAKE_ARGS "${CMAKE_ARGS};-DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>")
+ExternalProject_Get_property(handlegraph INSTALL_DIR)
+set(handlegraph_INCLUDE "${INSTALL_DIR}/include")
+set(handlegraph_LIB "${INSTALL_DIR}/lib")
+
 # Set link directories. we can't use target_link_directories to keep these
 # straight between static and dynamic libraries since it's not available until
 # cmake 3.13, which isn't out in distros yet.
