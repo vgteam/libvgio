@@ -83,7 +83,7 @@ target_include_directories(vgio
         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}> # Capture the Protobuf generated header that lands here.
         ${HTSlib_INCLUDEDIR}
         ${Protobuf_INCLUDEDIR}
-        ${handlegraph_INCLUDE}
+        $<BUILD_INTERFACE:${handlegraph_INCLUDE}>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
@@ -94,7 +94,7 @@ target_include_directories(vgio_static
         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}> # Capture the Protobuf generated header that lands here.
         ${HTSlib_INCLUDEDIR}
         ${Protobuf_INCLUDEDIR}
-        ${handlegraph_INCLUDE}
+        $<BUILD_INTERFACE:${handlegraph_INCLUDE}>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
