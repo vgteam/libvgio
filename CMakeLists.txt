@@ -83,6 +83,7 @@ target_include_directories(vgio
         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}> # Capture the Protobuf generated header that lands here.
         ${HTSlib_INCLUDEDIR}
         ${Protobuf_INCLUDEDIR}
+        ${handlegraph_INCLUDE}
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
@@ -93,6 +94,7 @@ target_include_directories(vgio_static
         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}> # Capture the Protobuf generated header that lands here.
         ${HTSlib_INCLUDEDIR}
         ${Protobuf_INCLUDEDIR}
+        ${handlegraph_INCLUDE}
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
@@ -105,11 +107,11 @@ target_compile_features(vgio_static PUBLIC cxx_std_14)
 # Also note that target_link_directories needs cmake 3.13+
 target_link_libraries(vgio
     PUBLIC
-        ${Protobuf_LIBRARIES} Threads::Threads ${HTSlib_LIBRARIES}
+        ${Protobuf_LIBRARIES} Threads::Threads ${HTSlib_LIBRARIES} ${handlegraph_LIB}/libhandlegraph${CMAKE_SHARED_LIBRARY_SUFFIX}
 )
 target_link_libraries(vgio_static
     PUBLIC
-        ${Protobuf_STATIC_LIBRARIES} Threads::Threads ${HTSlib_STATIC_LIBRARIES}
+        ${Protobuf_STATIC_LIBRARIES} Threads::Threads ${HTSlib_STATIC_LIBRARIES} ${handlegraph_LIB}/libhandlegraph${CMAKE_STATIC_LIBRARY_SUFFIX}
 )
 
 # Installation instructions
