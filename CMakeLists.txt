@@ -49,11 +49,24 @@ set(CMAKE_CXX_STANDARD 14)
 # Declare dependencies and explain how to find them
 find_package(PkgConfig REQUIRED)
 
-# We need to find Protobuf normally to get the protobuf_generate_cpp command
+# We need to find Protobuf normally to get the protobuf_generate_cpp command.
+# We can only get one version of the libraries this way (static or dynamic). We
+# used to also look with pkg_config to find both versions, but that allows us
+# to choose two different Protobufs with the different methods, which causes
+# Problems.
+# No amount of unsetting variables seems to let us invoke this twice to get
+# different flavors, and we don't really want to fork FindProtobuf.cmake. So we
+# find the dynamic library and assume the static library is a .a next to it.
+set(Protobuf_USE_STATIC_LIBS OFF)
+# To investigate why we pick the Protobuf we do, do this:
+set(Protobuf_DEBUG ON)
 find_package(Protobuf REQUIRED)
-# But we also need to find it via pkg-config to get both the static and dynamic libraries.
-# The default find_package implementation can only give us one or the other.
-pkg_check_modules(Protobuf REQUIRED protobuf)
+string(REGEX REPLACE "(\\.so|\\.dylib)$" ".a" Protobuf_STATIC_LIBRARIES "${Protobuf_LIBRARIES}")
+message("Protobuf will be ${Protobuf_LIBRARIES} for PIC dynamic code and ${Protobuf_STATIC_LIBRARIES} for non-PIC static code")
+# TODO: This is *supposed* to define a protobuf::libprotobuf target, but it doesn't.
+# Just use old-style ${Protobuf_INCLUDE_DIRS} and ${Protobuf_LIBRARIES}
+# instead. Also, with the targets we probably can't redo find_package.
+
 
 # Find threads
 set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -76,12 +89,12 @@ ExternalProject_Get_property(handlegraph INSTALL_DIR)
 set(handlegraph_INCLUDE "${INSTALL_DIR}/include")
 set(handlegraph_LIB "${INSTALL_DIR}/lib")
 
-# Set link directories. we can't use target_link_directories to keep these
+# Set link directories. We can't use target_link_directories to keep these
 # straight between static and dynamic libraries since it's not available until
 # cmake 3.13, which isn't out in distros yet.
 link_directories(
-    ${Protobuf_LIBRARY_DIRS} ${HTSlib_LIBRARY_DIRS} ${Jansson_LIBRARY_DIRS}
-    ${Protobuf_STATIC_LIBRARY_DIRS} ${HTSlib_STATIC_LIBRARY_DIRS} ${Jansson_STATIC_LIBRARY_DIRS}
+    ${HTSlib_LIBRARY_DIRS} ${Jansson_LIBRARY_DIRS}
+    ${HTSlib_STATIC_LIBRARY_DIRS} ${Jansson_STATIC_LIBRARY_DIRS}
 )
 
 # Set where the LC_ID_DYLIB install name for Mac dylib files ought to point.
@@ -124,7 +137,7 @@ target_include_directories(vgio
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}> # Capture the Protobuf generated header that lands here.
         ${HTSlib_INCLUDEDIR}
-        ${Protobuf_INCLUDEDIR}
+        ${Protobuf_INCLUDE_DIRS}
         ${Jansson_INCLUDEDIR}
         $<BUILD_INTERFACE:${handlegraph_INCLUDE}>
     PRIVATE
@@ -136,7 +149,7 @@ target_include_directories(vgio_static
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}> # Capture the Protobuf generated header that lands here.
         ${HTSlib_INCLUDEDIR}
-        ${Protobuf_INCLUDEDIR}
+        ${Protobuf_INCLUDE_DIRS}
         ${Jansson_INCLUDEDIR}
         $<BUILD_INTERFACE:${handlegraph_INCLUDE}>
     PRIVATE
