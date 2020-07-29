@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.9)
 project(libvgio VERSION 0.0.0 LANGUAGES CXX)
 
 # Optimize by default, but also include debug info
-set(CMAKE_CXX_FLAGS "-O3 -g")
+set(CMAKE_CXX_FLAGS "-O3 -g ${CMAKE_CXX_FLAGS}")
 if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
 
   # assumes clang build
