@@ -187,8 +187,19 @@ message Subpath {
 
     // score of this subpath's alignment
     int32 score = 3;
+    
+    // connections to other subpaths that are not necessarily contiguous in the graph
+    repeated Connection connection = 4;
 }
 
+// An edge in a MultipathAlignment between Subpaths that may not be contiguous in the graph
+message Connection {
+    // the index of the Subpath that this connection points to
+    uint32 next = 1;
+    
+    // the score of this connection
+    int32 score = 2;
+}
 
 // Used to serialize kmer matches.
 message KmerMatch {
