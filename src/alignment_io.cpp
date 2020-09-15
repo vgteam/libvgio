@@ -189,24 +189,25 @@ size_t paired_for_each_parallel_after_wait(function<bool(Alignment&, Alignment&)
     return nLines;
 }
 
-bool get_next_alignment_from_gaf(const HandleGraph& graph, htsFile* fp, kstring_t& s_buffer, gafkluge::GafRecord& g_buffer,
+bool get_next_alignment_from_gaf(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, htsFile* fp, kstring_t& s_buffer, gafkluge::GafRecord& g_buffer,
                                  Alignment& alignment) {
+    
     if (hts_getline(fp, '\n', &s_buffer) <= 0) {
         return false;
     }
 
     gafkluge::parse_gaf_record(ks_str(&s_buffer), g_buffer);
-    gaf_to_alignment(graph, g_buffer, alignment);
+    gaf_to_alignment(node_to_length, node_to_sequence, g_buffer, alignment);
     return true;
 }
 
-bool get_next_interleaved_alignment_pair_from_gaf(const HandleGraph& graph, htsFile* fp, kstring_t& s_buffer,
+bool get_next_interleaved_alignment_pair_from_gaf(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, htsFile* fp, kstring_t& s_buffer,
                                                   gafkluge::GafRecord& g_buffer, Alignment& mate1, Alignment& mate2) {
-    return get_next_alignment_from_gaf(graph, fp, s_buffer, g_buffer, mate1) &&
-        get_next_alignment_from_gaf(graph, fp, s_buffer, g_buffer, mate2);
+    return get_next_alignment_from_gaf(node_to_length, node_to_sequence, fp, s_buffer, g_buffer, mate1) &&
+        get_next_alignment_from_gaf(node_to_length, node_to_sequence, fp, s_buffer, g_buffer, mate2);
 }
 
-size_t gaf_unpaired_for_each(const HandleGraph& graph, const string& filename, function<void(Alignment&)> lambda) {
+size_t gaf_unpaired_for_each(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const string& filename, function<void(Alignment&)> lambda) {
 
     htsFile* in = hts_open(filename.c_str(), "r");
     if (in == NULL) {
@@ -218,7 +219,7 @@ size_t gaf_unpaired_for_each(const HandleGraph& graph, const string& filename, f
     gafkluge::GafRecord gaf;
     size_t count = 0;
 
-    while (get_next_alignment_from_gaf(graph, in, s_buffer, gaf, aln) == true) {
+    while (get_next_alignment_from_gaf(node_to_length, node_to_sequence, in, s_buffer, gaf, aln) == true) {
         lambda(aln);
         ++count;
     }
@@ -228,7 +229,17 @@ size_t gaf_unpaired_for_each(const HandleGraph& graph, const string& filename, f
     return count;
 }
 
-size_t gaf_paired_interleaved_for_each(const HandleGraph& graph, const string& filename,
+size_t gaf_unpaired_for_each(const HandleGraph& graph, const string& filename, function<void(Alignment&)> lambda) {
+    function<size_t(nid_t)> node_to_length = [&graph](nid_t node_id) {
+        return graph.get_length(graph.get_handle(node_id));
+    };
+    function<string(nid_t, bool)> node_to_sequence = [&graph](nid_t node_id, bool is_reversed) {
+        return graph.get_sequence(graph.get_handle(node_id, is_reversed));
+    };
+    return gaf_unpaired_for_each(node_to_length, node_to_sequence, filename, lambda);
+}
+
+size_t gaf_paired_interleaved_for_each(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const string& filename,
                                        function<void(Alignment&, Alignment&)> lambda) {
 
     htsFile* in = hts_open(filename.c_str(), "r");
@@ -241,7 +252,7 @@ size_t gaf_paired_interleaved_for_each(const HandleGraph& graph, const string& f
     gafkluge::GafRecord gaf;
     size_t count = 0;
 
-    while (get_next_interleaved_alignment_pair_from_gaf(graph, in, s_buffer, gaf, aln1, aln2) == true) {
+    while (get_next_interleaved_alignment_pair_from_gaf(node_to_length, node_to_sequence, in, s_buffer, gaf, aln1, aln2) == true) {
         lambda(aln1, aln2);
         count += 2;
     }
@@ -251,7 +262,18 @@ size_t gaf_paired_interleaved_for_each(const HandleGraph& graph, const string& f
     return count;
 }
 
-size_t gaf_unpaired_for_each_parallel(const HandleGraph& graph, const string& filename,
+size_t gaf_paired_interleaved_for_each(const HandleGraph& graph, const string& filename,
+                                       function<void(Alignment&, Alignment&)> lambda) {
+    function<size_t(nid_t)> node_to_length = [&graph](nid_t node_id) {
+        return graph.get_length(graph.get_handle(node_id));
+    };
+    function<string(nid_t, bool)> node_to_sequence = [&graph](nid_t node_id, bool is_reversed) {
+        return graph.get_sequence(graph.get_handle(node_id, is_reversed));
+    };
+    return gaf_paired_interleaved_for_each(node_to_length, node_to_sequence, filename, lambda);
+}
+
+size_t gaf_unpaired_for_each_parallel(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const string& filename,
                                       function<void(Alignment&)> lambda,
                                       uint64_t batch_size) {
 
@@ -265,7 +287,7 @@ size_t gaf_unpaired_for_each_parallel(const HandleGraph& graph, const string& fi
     gafkluge::GafRecord gaf;
     
     function<bool(Alignment&)> get_read = [&](Alignment& aln) {
-        return get_next_alignment_from_gaf(graph, in, s_buffer, gaf, aln);
+        return get_next_alignment_from_gaf(node_to_length, node_to_sequence, in, s_buffer, gaf, aln);
     };
         
     size_t nLines = unpaired_for_each_parallel(get_read, lambda, batch_size);
@@ -275,13 +297,31 @@ size_t gaf_unpaired_for_each_parallel(const HandleGraph& graph, const string& fi
 
 }
 
+size_t gaf_unpaired_for_each_parallel(const HandleGraph& graph, const string& filename,
+                                      function<void(Alignment&)> lambda,
+                                      uint64_t batch_size) {    
+    function<size_t(nid_t)> node_to_length = [&graph](nid_t node_id) {
+        return graph.get_length(graph.get_handle(node_id));
+    };
+    function<string(nid_t, bool)> node_to_sequence = [&graph](nid_t node_id, bool is_reversed) {
+        return graph.get_sequence(graph.get_handle(node_id, is_reversed));
+    };
+    return gaf_unpaired_for_each_parallel(node_to_length, node_to_sequence, filename, lambda, batch_size);
+}
+
+size_t gaf_paired_interleaved_for_each_parallel(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const string& filename,
+                                                function<void(Alignment&, Alignment&)> lambda,
+                                                uint64_t batch_size) {
+    return gaf_paired_interleaved_for_each_parallel_after_wait(node_to_length, node_to_sequence, filename, lambda, [](void) {return true;}, batch_size);
+}
+
 size_t gaf_paired_interleaved_for_each_parallel(const HandleGraph& graph, const string& filename,
                                                 function<void(Alignment&, Alignment&)> lambda,
                                                 uint64_t batch_size) {
     return gaf_paired_interleaved_for_each_parallel_after_wait(graph, filename, lambda, [](void) {return true;}, batch_size);
 }
 
-size_t gaf_paired_interleaved_for_each_parallel_after_wait(const HandleGraph& graph, const string& filename,
+size_t gaf_paired_interleaved_for_each_parallel_after_wait(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const string& filename,
                                                            function<void(Alignment&, Alignment&)> lambda,
                                                            function<bool(void)> single_threaded_until_true,
                                                            uint64_t batch_size) {
@@ -296,7 +336,7 @@ size_t gaf_paired_interleaved_for_each_parallel_after_wait(const HandleGraph& gr
     gafkluge::GafRecord gaf;
     
     function<bool(Alignment&, Alignment&)> get_pair = [&](Alignment& mate1, Alignment& mate2) {
-        return get_next_interleaved_alignment_pair_from_gaf(graph, in, s_buffer, gaf, mate1, mate2);
+        return get_next_interleaved_alignment_pair_from_gaf(node_to_length, node_to_sequence, in, s_buffer, gaf, mate1, mate2);
     };
     
     size_t nLines = paired_for_each_parallel_after_wait(get_pair, lambda, single_threaded_until_true, batch_size);
@@ -305,7 +345,20 @@ size_t gaf_paired_interleaved_for_each_parallel_after_wait(const HandleGraph& gr
     return nLines;    
 }
 
-gafkluge::GafRecord alignment_to_gaf(const HandleGraph& graph, const Alignment& aln, bool cs_cigar, bool base_quals) {
+size_t gaf_paired_interleaved_for_each_parallel_after_wait(const HandleGraph& graph, const string& filename,
+                                                           function<void(Alignment&, Alignment&)> lambda,
+                                                           function<bool(void)> single_threaded_until_true,
+                                                           uint64_t batch_size) {
+    function<size_t(nid_t)> node_to_length = [&graph](nid_t node_id) {
+        return graph.get_length(graph.get_handle(node_id));
+    };
+    function<string(nid_t, bool)> node_to_sequence = [&graph](nid_t node_id, bool is_reversed) {
+        return graph.get_sequence(graph.get_handle(node_id, is_reversed));
+    };
+    return gaf_paired_interleaved_for_each_parallel_after_wait(node_to_length, node_to_sequence, filename, lambda, single_threaded_until_true, batch_size);
+}
+
+gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const Alignment& aln, bool cs_cigar, bool base_quals) {
 
     gafkluge::GafRecord gaf;
 
@@ -341,7 +394,7 @@ gafkluge::GafRecord alignment_to_gaf(const HandleGraph& graph, const Alignment& 
             auto& mapping = aln.path().mapping(i);
             size_t offset = mapping.position().offset();
             string node_seq;
-            handle_t handle = graph.get_handle(mapping.position().node_id(), mapping.position().is_reverse());
+            const Position& position = mapping.position();
             bool skip_step = false;
             if (i == 0) {
                 // use path_start to store the offset of the first node
@@ -356,7 +409,7 @@ gafkluge::GafRecord alignment_to_gaf(const HandleGraph& graph, const Alignment& 
                     // of nodes using deletions since unlike GAM, we can only
                     // set the offset of the first node
                     if (node_seq.empty()) {
-                        node_seq = graph.get_sequence(handle);
+                        node_seq = node_to_sequence(position.node_id(), position.is_reverse());
                     }
                     cs_cigar_str += "-" + node_seq.substr(0, offset);
                 }
@@ -379,7 +432,7 @@ gafkluge::GafRecord alignment_to_gaf(const HandleGraph& graph, const Alignment& 
                         }
                         if (edit_is_sub(edit)) {
                             if (node_seq.empty()) {
-                                node_seq = graph.get_sequence(handle);
+                                node_seq = node_to_sequence(position.node_id(), position.is_reverse());
                             }
                             // Substitions expressed one base at a time, preceded by *
                             for (size_t k = 0; k < edit.from_length(); ++k) {
@@ -387,7 +440,7 @@ gafkluge::GafRecord alignment_to_gaf(const HandleGraph& graph, const Alignment& 
                             }
                         } else if (edit_is_deletion(edit)) {
                             if (node_seq.empty()) {
-                                node_seq = graph.get_sequence(handle);
+                                node_seq = node_to_sequence(position.node_id(), position.is_reverse());
                             }
                             // Deletion is - followed by deleted sequence
                             assert(offset + edit.from_length() <= node_seq.length());
@@ -402,12 +455,12 @@ gafkluge::GafRecord alignment_to_gaf(const HandleGraph& graph, const Alignment& 
                 total_to_len += edit.to_length();
             }
 
-            if (i < aln.path().mapping_size() - 1 && offset != graph.get_length(handle)) {
+            if (i < aln.path().mapping_size() - 1 && offset != node_to_length(position.node_id())) {
                 if (mapping.position().node_id() != aln.path().mapping(i + 1).position().node_id() ||
                     mapping.position().is_reverse() != aln.path().mapping(i + 1).position().is_reverse()) {
                     // we are hopping off the middle of a node, need to gobble it up with a deletion
                     if (node_seq.empty()) {
-                        node_seq = graph.get_sequence(handle);
+                        node_seq = node_to_sequence(position.node_id(), position.is_reverse());
                     }
                     if (running_match_length > 0) {
                         // Matches are : followed by the match length
@@ -431,7 +484,7 @@ gafkluge::GafRecord alignment_to_gaf(const HandleGraph& graph, const Alignment& 
                 step.is_stable = false;
                 step.is_reverse = position.is_reverse();
                 step.is_interval = false;
-                gaf.path_length += graph.get_length(graph.get_handle(position.node_id()));
+                gaf.path_length += node_to_length(position.node_id());
                 if (i == 0) {
                     gaf.path_start = position.offset();
                 }
@@ -490,7 +543,17 @@ gafkluge::GafRecord alignment_to_gaf(const HandleGraph& graph, const Alignment& 
     
 }
 
-void gaf_to_alignment(const HandleGraph& graph, const gafkluge::GafRecord& gaf, Alignment& aln) {
+gafkluge::GafRecord alignment_to_gaf(const HandleGraph& graph, const Alignment& aln, bool cs_cigar, bool base_quals) {
+    function<size_t(nid_t)> node_to_length = [&graph](nid_t node_id) {
+        return graph.get_length(graph.get_handle(node_id));
+    };
+    function<string(nid_t, bool)> node_to_sequence = [&graph](nid_t node_id, bool is_reversed) {
+        return graph.get_sequence(graph.get_handle(node_id, is_reversed));
+    };
+    return alignment_to_gaf(node_to_length, node_to_sequence, aln, cs_cigar, base_quals);
+}
+
+void gaf_to_alignment(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const gafkluge::GafRecord& gaf, Alignment& aln){
 
     aln.Clear();
 
@@ -520,9 +583,8 @@ void gaf_to_alignment(const HandleGraph& graph, const gafkluge::GafRecord& gaf, 
     if (!gaf.path.empty()) {
         size_t cur_mapping = 0;
         int64_t cur_offset = gaf.path_start;
-        handle_t cur_handle = graph.get_handle(aln.path().mapping(cur_mapping).position().node_id(),
-                                               aln.path().mapping(cur_mapping).position().is_reverse());
-        size_t cur_len = graph.get_length(cur_handle);
+        Position cur_position = aln.path().mapping(cur_mapping).position();
+        size_t cur_len = node_to_length(cur_position.node_id());
         string& sequence = *aln.mutable_sequence();
         // Use the CS cigar string to add Edits into our Path, as well as set the sequence
         gafkluge::for_each_cs(gaf, [&] (const string& cs_cigar) {
@@ -531,20 +593,21 @@ void gaf_to_alignment(const HandleGraph& graph, const gafkluge::GafRecord& gaf, 
                 if (cs_cigar[0] == ':') {
                     int64_t match_len = stol(cs_cigar.substr(1));
                     while (match_len > 0) {
-                        int64_t current_match = std::min(match_len, (int64_t)graph.get_length(cur_handle) - cur_offset);
+                        int64_t current_match = std::min(match_len, (int64_t)node_to_length(cur_position.node_id()) - cur_offset);
                         Edit* edit = aln.mutable_path()->mutable_mapping(cur_mapping)->add_edit();
                         edit->set_from_length(current_match);
                         edit->set_to_length(current_match);
-                        sequence += graph.get_sequence(cur_handle).substr(cur_offset, current_match);
+                        if (node_to_sequence) {
+                            sequence += node_to_sequence(cur_position.node_id(), cur_position.is_reverse()).substr(cur_offset, current_match);
+                        }
                         match_len -= current_match;
                         cur_offset += current_match;
                         if (match_len > 0) {
                             assert(cur_mapping < aln.path().mapping_size() - 1);
                             ++cur_mapping;
                             cur_offset = 0;
-                            cur_handle = graph.get_handle(aln.path().mapping(cur_mapping).position().node_id(),
-                                                          aln.path().mapping(cur_mapping).position().is_reverse());
-                            cur_len = graph.get_length(cur_handle);
+                            cur_position = aln.path().mapping(cur_mapping).position();
+                            cur_len = node_to_length(cur_position.node_id());
                         }
                     }
                 } else if (cs_cigar[0] == '+') {
@@ -561,19 +624,19 @@ void gaf_to_alignment(const HandleGraph& graph, const gafkluge::GafRecord& gaf, 
                     sequence += edit->sequence();
                 } else if (cs_cigar[0] == '-') {
                     string del = cs_cigar.substr(1);
-                    assert(del.length() <= graph.get_length(cur_handle) - cur_offset);
-                    assert(del == graph.get_sequence(cur_handle).substr(cur_offset, del.length()));
+                    assert(del.length() <= node_to_length(cur_position.node_id()) - cur_offset);
+                    assert(!node_to_sequence || del == node_to_sequence(cur_position.node_id(), cur_position.is_reverse()).substr(cur_offset, del.length()));
                     Edit* edit = aln.mutable_path()->mutable_mapping(cur_mapping)->add_edit();
                     edit->set_to_length(0);
                     edit->set_from_length(del.length());
                     cur_offset += del.length();
                     // unlike matches, we don't allow deletions to span multiple nodes
-                    assert(cur_offset <= graph.get_length(cur_handle));
+                    assert(cur_offset <= node_to_length(cur_position.node_id()));
                 } else if (cs_cigar[0] == '*') {
                     assert(cs_cigar.length() == 3);
                     char from = cs_cigar[1];
                     char to = cs_cigar[2];
-                    assert(graph.get_sequence(cur_handle)[cur_offset] == from);
+                    assert(!node_to_sequence || node_to_sequence(cur_position.node_id(), cur_position.is_reverse())[cur_offset] == from);
                     Edit* edit = aln.mutable_path()->mutable_mapping(cur_mapping)->add_edit();
                     // todo: support multibase snps
                     edit->set_from_length(1);
@@ -589,9 +652,8 @@ void gaf_to_alignment(const HandleGraph& graph, const gafkluge::GafRecord& gaf, 
                     ++cur_mapping;
                     cur_offset = 0;
                     if (cur_mapping < aln.path().mapping_size()) {
-                        cur_handle = graph.get_handle(aln.path().mapping(cur_mapping).position().node_id(),
-                                                      aln.path().mapping(cur_mapping).position().is_reverse());
-                        cur_len = graph.get_length(cur_handle);
+                        cur_position = aln.path().mapping(cur_mapping).position();
+                        cur_len = node_to_length(cur_position.node_id());
                     }
                 }
             });
@@ -611,6 +673,16 @@ void gaf_to_alignment(const HandleGraph& graph, const gafkluge::GafRecord& gaf, 
             aln.set_quality(string_quality_char_to_short(opt_it.second.second));
         }
     }
+}
+
+void gaf_to_alignment(const HandleGraph& graph, const gafkluge::GafRecord& gaf, Alignment& aln) {
+    function<size_t(nid_t)> node_to_length = [&graph](nid_t node_id) {
+        return graph.get_length(graph.get_handle(node_id));
+    };
+    function<string(nid_t, bool)> node_to_sequence = [&graph](nid_t node_id, bool is_reversed) {
+        return graph.get_sequence(graph.get_handle(node_id, is_reversed));
+    };
+    gaf_to_alignment(node_to_length, node_to_sequence, gaf, aln); 
 }
 
 short quality_char_to_short(char c) {
