@@ -37,26 +37,42 @@ size_t paired_for_each_parallel_after_wait(function<bool(Alignment&, Alignment&)
                                            function<bool(void)> single_threaded_until_true,
                                            uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
 // single gaf
-bool get_next_alignment_from_gaf(const HandleGraph& graph, htsFile* fp, kstring_t& s_buffer, gafkluge::GafRecord& g_buffer,
+bool get_next_alignment_from_gaf(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, htsFile* fp, kstring_t& s_buffer, gafkluge::GafRecord& g_buffer,
                                  Alignment& alignment);
-bool get_next_interleaved_alignment_pair_from_gaf(const HandleGraph& graph, htsFile* fp, kstring_t& s_buffer,
+bool get_next_interleaved_alignment_pair_from_gaf(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, htsFile* fp, kstring_t& s_buffer,
                                                   gafkluge::GafRecord& g_buffer, Alignment& mate1, Alignment& mate2);
+size_t gaf_unpaired_for_each(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const string& filename, function<void(Alignment&)> lambda);
 size_t gaf_unpaired_for_each(const HandleGraph& graph, const string& filename, function<void(Alignment&)> lambda);
+size_t gaf_paired_interleaved_for_each(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const string& filename,
+                                       function<void(Alignment&, Alignment&)> lambda);
 size_t gaf_paired_interleaved_for_each(const HandleGraph& graph, const string& filename,
                                        function<void(Alignment&, Alignment&)> lambda);
+
 // parallel gaf
+size_t gaf_unpaired_for_each_parallel(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const string& filename,
+                                      function<void(Alignment&)> lambda,
+                                      uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
 size_t gaf_unpaired_for_each_parallel(const HandleGraph& graph, const string& filename,
                                       function<void(Alignment&)> lambda,
                                       uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+size_t gaf_paired_interleaved_for_each_parallel(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const string& filename,
+                                                function<void(Alignment&, Alignment&)> lambda,
+                                                uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
 size_t gaf_paired_interleaved_for_each_parallel(const HandleGraph& graph, const string& filename,
                                                 function<void(Alignment&, Alignment&)> lambda,
                                                 uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+size_t gaf_paired_interleaved_for_each_parallel_after_wait(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const string& filename,
+                                                           function<void(Alignment&, Alignment&)> lambda,
+                                                           function<bool(void)> single_threaded_until_true,
+                                                           uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
 size_t gaf_paired_interleaved_for_each_parallel_after_wait(const HandleGraph& graph, const string& filename,
                                                            function<void(Alignment&, Alignment&)> lambda,
                                                            function<bool(void)> single_threaded_until_true,
                                                            uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
 // gaf conversion
+gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const Alignment& aln, bool cs_cigar = true, bool base_quals = true);
 gafkluge::GafRecord alignment_to_gaf(const HandleGraph& graph, const Alignment& aln, bool cs_cigar = true, bool base_quals = true);
+void gaf_to_alignment(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const gafkluge::GafRecord& gaf, Alignment& aln);
 void gaf_to_alignment(const HandleGraph& graph, const gafkluge::GafRecord& gaf, Alignment& aln);
 
 // utility
