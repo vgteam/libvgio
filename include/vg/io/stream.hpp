@@ -205,8 +205,8 @@ void for_each_parallel_impl(std::istream& in,
                         T obj1, obj2;
                         for (int i = 0; i<batch_size; i+=2) {
                             // parse protobuf objects and invoke lambda on the pair
-                            handle(obj1.ParseFromString(batch->at(i)));
-                            handle(obj2.ParseFromString(batch->at(i+1)));
+                            handle(ProtobufIterator<T>::parse_from_string(obj1, batch->at(i)));
+                            handle(ProtobufIterator<T>::parse_from_string(obj2, batch->at(i+1)));
                             lambda2(obj1,obj2);
                         }
                     } // scope obj1 & obj2
@@ -241,8 +241,8 @@ void for_each_parallel_impl(std::istream& in,
                             T obj1, obj2;
                             for (int i = 0; i<batch_size; i+=2) {
                                 // parse protobuf objects and invoke lambda on the pair
-                                handle(obj1.ParseFromString(batch->at(i)));
-                                handle(obj2.ParseFromString(batch->at(i+1)));
+                                handle(ProtobufIterator<T>::parse_from_string(obj1, batch->at(i)));
+                                handle(ProtobufIterator<T>::parse_from_string(obj2, batch->at(i+1)));
                                 lambda2(obj1,obj2);
                             }
                         } // scope obj1 & obj2
@@ -267,12 +267,12 @@ void for_each_parallel_impl(std::istream& in,
                 T obj1, obj2;
                 int i = 0;
                 for (; i < batch->size()-1; i+=2) {
-                    handle(obj1.ParseFromString(batch->at(i)));
-                    handle(obj2.ParseFromString(batch->at(i+1)));
+                    handle(ProtobufIterator<T>::parse_from_string(obj1, batch->at(i)));
+                    handle(ProtobufIterator<T>::parse_from_string(obj2, batch->at(i+1)));
                     lambda2(obj1, obj2);
                 }
                 if (i == batch->size()-1) { // odd last object
-                    handle(obj1.ParseFromString(batch->at(i)));
+                    handle(ProtobufIterator<T>::parse_from_string(obj1, batch->at(i)));
                     lambda1(obj1);
                 }
             }
