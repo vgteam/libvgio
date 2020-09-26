@@ -10,201 +10,20 @@ namespace vg {
 
 namespace io {
 
-size_t unpaired_for_each_parallel(function<bool(Alignment&)> get_read_if_available,
-                                  function<void(Alignment&)> lambda,
-                                  uint64_t batch_size) {
-    assert(batch_size % 2 == 0);    
-    size_t nLines = 0;
-    vector<Alignment> *batch = nullptr;
-    // number of batches currently being processed
-    uint64_t batches_outstanding = 0;
-#pragma omp parallel default(none) shared(batches_outstanding, batch, nLines, get_read_if_available, lambda, batch_size)
-#pragma omp single
-    {
-        
-        // max # of such batches to be holding in memory
-        uint64_t max_batches_outstanding = batch_size;
-        // max # we will ever increase the batch buffer to
-        const uint64_t max_max_batches_outstanding = 1 << 13; // 8192
-        
-        // alignments to hold the incoming data
-        Alignment aln;
-        // did we find the end of the file yet?
-        bool more_data = true;
-        
-        while (more_data) {
-            // init a new batch
-            batch = new std::vector<Alignment>();
-            batch->reserve(batch_size);
-            
-            // load up to the batch-size number of reads
-            for (int i = 0; i < batch_size; i++) {
-                
-                more_data = get_read_if_available(aln);
-                
-                if (more_data) {
-                    batch->emplace_back(std::move(aln));
-                    nLines++;
-                }
-                else {
-                    break;
-                }
-            }
-            
-            // did we get a batch?
-            if (batch->size()) {
-                
-                // how many batch tasks are outstanding currently, including this one?
-                uint64_t current_batches_outstanding;
-#pragma omp atomic capture
-                current_batches_outstanding = ++batches_outstanding;
-                
-                if (current_batches_outstanding >= max_batches_outstanding) {
-                    // do this batch in the current thread because we've spawned the maximum number of
-                    // concurrent batch tasks
-                    for (auto& aln : *batch) {
-                        lambda(aln);
-                    }
-                    delete batch;
-#pragma omp atomic capture
-                    current_batches_outstanding = --batches_outstanding;
-                    
-                    if (4 * current_batches_outstanding / 3 < max_batches_outstanding
-                        && max_batches_outstanding < max_max_batches_outstanding) {
-                        // we went through at least 1/4 of the batch buffer while we were doing this thread's batch
-                        // this looks risky, since we want the batch buffer to stay populated the entire time we're
-                        // occupying this thread on compute, so let's increase the batch buffer size
-                        
-                        max_batches_outstanding *= 2;
-                    }
-                }
-                else {
-                    // spawn a new task to take care of this batch
-#pragma omp task default(none) firstprivate(batch) shared(batches_outstanding, lambda)
-                    {
-                        for (auto& aln : *batch) {
-                            lambda(aln);
-                        }
-                        delete batch;
-#pragma omp atomic update
-                        batches_outstanding--;
-                    }
-                }
-            }
-        }
-    }
-    return nLines;
-}
-
-size_t paired_for_each_parallel_after_wait(function<bool(Alignment&, Alignment&)> get_pair_if_available,
-                                           function<void(Alignment&, Alignment&)> lambda,
-                                           function<bool(void)> single_threaded_until_true,
-                                           uint64_t batch_size) {
-
-    assert(batch_size % 2 == 0);
-    size_t nLines = 0;
-    vector<pair<Alignment, Alignment> > *batch = nullptr;
-    // number of batches currently being processed
-    uint64_t batches_outstanding = 0;
-    
-#pragma omp parallel default(none) shared(batches_outstanding, batch, nLines, get_pair_if_available, single_threaded_until_true, lambda, batch_size)
-#pragma omp single
-    {
-
-        // max # of such batches to be holding in memory
-        uint64_t max_batches_outstanding = batch_size;
-        // max # we will ever increase the batch buffer to
-        const uint64_t max_max_batches_outstanding = 1 << 13; // 8192
-        
-        // alignments to hold the incoming data
-        Alignment mate1, mate2;
-        // did we find the end of the file yet?
-        bool more_data = true;
-        
-        while (more_data) {
-            // init a new batch
-            batch = new std::vector<pair<Alignment, Alignment>>();
-            batch->reserve(batch_size);
-            
-            // load up to the batch-size number of pairs
-            for (int i = 0; i < batch_size; i++) {
-                
-                more_data = get_pair_if_available(mate1, mate2);
-                
-                if (more_data) {
-                    batch->emplace_back(std::move(mate1), std::move(mate2));
-                    nLines++;
-                }
-                else {
-                    break;
-                }
-            }
-            
-            // did we get a batch?
-            if (batch->size()) {
-                // how many batch tasks are outstanding currently, including this one?
-                uint64_t current_batches_outstanding;
-#pragma omp atomic capture
-                current_batches_outstanding = ++batches_outstanding;
-                
-                bool do_single_threaded = !single_threaded_until_true();
-                if (current_batches_outstanding >= max_batches_outstanding || do_single_threaded) {
-                    // do this batch in the current thread because we've spawned the maximum number of
-                    // concurrent batch tasks or because we are directed to work in a single thread
-                    for (auto& p : *batch) {
-                        lambda(p.first, p.second);
-                    }
-                    delete batch;
-#pragma omp atomic capture
-                    current_batches_outstanding = --batches_outstanding;
-                    
-                    if (4 * current_batches_outstanding / 3 < max_batches_outstanding
-                        && max_batches_outstanding < max_max_batches_outstanding
-                        && !do_single_threaded) {
-                        // we went through at least 1/4 of the batch buffer while we were doing this thread's batch
-                        // this looks risky, since we want the batch buffer to stay populated the entire time we're
-                        // occupying this thread on compute, so let's increase the batch buffer size
-                        // (skip this adjustment if you're in single-threaded mode and thus expect the buffer to be
-                        // empty)
-                        
-                        max_batches_outstanding *= 2;
-                    }
-                }
-                else {
-                    // spawn a new task to take care of this batch
-#pragma omp task default(none) firstprivate(batch) shared(batches_outstanding, lambda)
-                    {
-                        for (auto& p : *batch) {
-                            lambda(p.first, p.second);
-                        }
-                        delete batch;
-#pragma omp atomic update
-                        batches_outstanding--;
-                    }
-                }
-            }
-        }
-    }
-    
-    return nLines;
-}
-
-bool get_next_alignment_from_gaf(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, htsFile* fp, kstring_t& s_buffer, gafkluge::GafRecord& g_buffer,
-                                 Alignment& alignment) {
+bool get_next_record_from_gaf(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, htsFile* fp, kstring_t& s_buffer, gafkluge::GafRecord& record) {
     
     if (hts_getline(fp, '\n', &s_buffer) <= 0) {
         return false;
     }
 
-    gafkluge::parse_gaf_record(ks_str(&s_buffer), g_buffer);
-    gaf_to_alignment(node_to_length, node_to_sequence, g_buffer, alignment);
+    gafkluge::parse_gaf_record(ks_str(&s_buffer), record);
     return true;
 }
 
-bool get_next_interleaved_alignment_pair_from_gaf(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, htsFile* fp, kstring_t& s_buffer,
-                                                  gafkluge::GafRecord& g_buffer, Alignment& mate1, Alignment& mate2) {
-    return get_next_alignment_from_gaf(node_to_length, node_to_sequence, fp, s_buffer, g_buffer, mate1) &&
-        get_next_alignment_from_gaf(node_to_length, node_to_sequence, fp, s_buffer, g_buffer, mate2);
+bool get_next_interleaved_record_pair_from_gaf(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, htsFile* fp, kstring_t& s_buffer,
+                                               gafkluge::GafRecord& record1, gafkluge::GafRecord& record2) {
+    return get_next_record_from_gaf(node_to_length, node_to_sequence, fp, s_buffer, record1) &&
+        get_next_record_from_gaf(node_to_length, node_to_sequence, fp, s_buffer, record2);
 }
 
 size_t gaf_unpaired_for_each(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const string& filename, function<void(Alignment&)> lambda) {
@@ -219,7 +38,8 @@ size_t gaf_unpaired_for_each(function<size_t(nid_t)> node_to_length, function<st
     gafkluge::GafRecord gaf;
     size_t count = 0;
 
-    while (get_next_alignment_from_gaf(node_to_length, node_to_sequence, in, s_buffer, gaf, aln) == true) {
+    while (get_next_record_from_gaf(node_to_length, node_to_sequence, in, s_buffer, gaf) == true) {
+        gaf_to_alignment(node_to_length, node_to_sequence, gaf, aln);
         lambda(aln);
         ++count;
     }
@@ -249,10 +69,12 @@ size_t gaf_paired_interleaved_for_each(function<size_t(nid_t)> node_to_length, f
     
     kstring_t s_buffer = KS_INITIALIZE;
     Alignment aln1, aln2;
-    gafkluge::GafRecord gaf;
+    gafkluge::GafRecord gaf1, gaf2;
     size_t count = 0;
 
-    while (get_next_interleaved_alignment_pair_from_gaf(node_to_length, node_to_sequence, in, s_buffer, gaf, aln1, aln2) == true) {
+    while (get_next_interleaved_record_pair_from_gaf(node_to_length, node_to_sequence, in, s_buffer, gaf1, gaf2) == true) {
+        gaf_to_alignment(node_to_length, node_to_sequence, gaf1, aln1);
+        gaf_to_alignment(node_to_length, node_to_sequence, gaf2, aln2);
         lambda(aln1, aln2);
         count += 2;
     }
@@ -283,14 +105,18 @@ size_t gaf_unpaired_for_each_parallel(function<size_t(nid_t)> node_to_length, fu
     }
 
     kstring_t s_buffer = KS_INITIALIZE;
-    Alignment aln1, aln2;
-    gafkluge::GafRecord gaf;
     
-    function<bool(Alignment&)> get_read = [&](Alignment& aln) {
-        return get_next_alignment_from_gaf(node_to_length, node_to_sequence, in, s_buffer, gaf, aln);
+    function<bool(gafkluge::GafRecord&)> get_read = [&](gafkluge::GafRecord& gaf) {
+        return get_next_record_from_gaf(node_to_length, node_to_sequence, in, s_buffer, gaf);
+    };
+
+    function<void(gafkluge::GafRecord&)> gaf_lambda = [&] (gafkluge::GafRecord& gaf) {
+        Alignment aln;
+        gaf_to_alignment(node_to_length, node_to_sequence, gaf, aln);
+        lambda(aln);
     };
         
-    size_t nLines = unpaired_for_each_parallel(get_read, lambda, batch_size);
+    size_t nLines = unpaired_for_each_parallel(get_read, gaf_lambda, batch_size);
     
     hts_close(in);
     return nLines;
@@ -332,14 +158,18 @@ size_t gaf_paired_interleaved_for_each_parallel_after_wait(function<size_t(nid_t
     }
 
     kstring_t s_buffer = KS_INITIALIZE;
-    Alignment aln1, aln2;
-    gafkluge::GafRecord gaf;
     
-    function<bool(Alignment&, Alignment&)> get_pair = [&](Alignment& mate1, Alignment& mate2) {
-        return get_next_interleaved_alignment_pair_from_gaf(node_to_length, node_to_sequence, in, s_buffer, gaf, mate1, mate2);
+    function<bool(gafkluge::GafRecord&, gafkluge::GafRecord&)> get_pair = [&](gafkluge::GafRecord& mate1, gafkluge::GafRecord& mate2) {
+        return get_next_interleaved_record_pair_from_gaf(node_to_length, node_to_sequence, in, s_buffer, mate1, mate2);
     };
-    
-    size_t nLines = paired_for_each_parallel_after_wait(get_pair, lambda, single_threaded_until_true, batch_size);
+
+    function<void(gafkluge::GafRecord&, gafkluge::GafRecord&)> gaf_lambda = [&] (gafkluge::GafRecord& mate1, gafkluge::GafRecord& mate2) {
+        Alignment aln1, aln2;
+        gaf_to_alignment(node_to_length, node_to_sequence, mate1, aln1);
+        gaf_to_alignment(node_to_length, node_to_sequence, mate2, aln2);
+        lambda(aln1, aln2);        
+    };
+    size_t nLines = paired_for_each_parallel_after_wait(get_pair, gaf_lambda, single_threaded_until_true, batch_size);
 
     hts_close(in);
     return nLines;    
