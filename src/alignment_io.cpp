@@ -188,7 +188,7 @@ size_t gaf_paired_interleaved_for_each_parallel_after_wait(const HandleGraph& gr
     return gaf_paired_interleaved_for_each_parallel_after_wait(node_to_length, node_to_sequence, filename, lambda, single_threaded_until_true, batch_size);
 }
 
-gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const Alignment& aln, bool cs_cigar, bool base_quals) {
+gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const Alignment& aln, bool cs_cigar, bool base_quals, bool frag_links) {
 
     gafkluge::GafRecord gaf;
 
@@ -365,22 +365,30 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length, fun
         // optional base qualities
         if (base_quals && !aln.quality().empty()) { 
             gaf.opt_fields["bq"] = make_pair("Z", string_quality_short_to_char(aln.quality()));
-        }   
-                
+        }
+
+        // optional frag_next/prev names
+        if (frag_links == true) {
+            if (aln.has_fragment_next()) {
+                gaf.opt_fields["fn"] = make_pair("Z", aln.fragment_next().name());
+            }
+            if (aln.has_fragment_prev()) {
+                gaf.opt_fields["fp"] = make_pair("Z", aln.fragment_prev().name());
+            }
+        }
     }
 
-    return gaf;
-    
+    return gaf;    
 }
 
-gafkluge::GafRecord alignment_to_gaf(const HandleGraph& graph, const Alignment& aln, bool cs_cigar, bool base_quals) {
+gafkluge::GafRecord alignment_to_gaf(const HandleGraph& graph, const Alignment& aln, bool cs_cigar, bool base_quals, bool frag_links) {
     function<size_t(nid_t)> node_to_length = [&graph](nid_t node_id) {
         return graph.get_length(graph.get_handle(node_id));
     };
     function<string(nid_t, bool)> node_to_sequence = [&graph](nid_t node_id, bool is_reversed) {
         return graph.get_sequence(graph.get_handle(node_id, is_reversed));
     };
-    return alignment_to_gaf(node_to_length, node_to_sequence, aln, cs_cigar, base_quals);
+    return alignment_to_gaf(node_to_length, node_to_sequence, aln, cs_cigar, base_quals, frag_links);
 }
 
 void gaf_to_alignment(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const gafkluge::GafRecord& gaf, Alignment& aln){
@@ -501,6 +509,12 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length, function<string(ni
         } else if (opt_it.first == "bq") {
             // get the quality from the bq field
             aln.set_quality(string_quality_char_to_short(opt_it.second.second));
+        } else if (opt_it.first == "fp") {
+            // get the fragment_previous field
+            aln.mutable_fragment_prev()->set_name(opt_it.second.second);
+        } else if (opt_it.first == "fn") {
+            // get the fragment_next field
+            aln.mutable_fragment_next()->set_name(opt_it.second.second);
         }
     }
 }
