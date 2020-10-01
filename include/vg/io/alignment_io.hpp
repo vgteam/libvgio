@@ -71,8 +71,8 @@ size_t gaf_paired_interleaved_for_each_parallel_after_wait(const HandleGraph& gr
                                                            function<bool(void)> single_threaded_until_true,
                                                            uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
 // gaf conversion
-gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const Alignment& aln, bool cs_cigar = true, bool base_quals = true);
-gafkluge::GafRecord alignment_to_gaf(const HandleGraph& graph, const Alignment& aln, bool cs_cigar = true, bool base_quals = true);
+gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const Alignment& aln, bool cs_cigar = true, bool base_quals = true, bool frag_links = true);
+gafkluge::GafRecord alignment_to_gaf(const HandleGraph& graph, const Alignment& aln, bool cs_cigar = true, bool base_quals = true, bool frag_links = true);
 void gaf_to_alignment(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const gafkluge::GafRecord& gaf, Alignment& aln);
 void gaf_to_alignment(const HandleGraph& graph, const gafkluge::GafRecord& gaf, Alignment& aln);
 
