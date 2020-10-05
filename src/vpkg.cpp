@@ -42,7 +42,7 @@ bool VPKG::sniff_magic(istream& stream, const string& magic) {
     char buffer[to_sniff];
     // Have a cursor in the buffer
     size_t buffer_used = 0;
-    
+
     while (stream.peek() != EOF && buffer_used < to_sniff) {
         // Until we fill the buffer or would hit EOF, fill the buffer
         buffer[buffer_used] = (char) stream.get();

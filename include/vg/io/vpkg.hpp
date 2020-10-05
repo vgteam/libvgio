@@ -8,6 +8,7 @@
 #include "registry.hpp"
 #include "message_iterator.hpp"
 #include "message_emitter.hpp"
+#include "fdstream.hpp"
 
 #include <iostream>
 #include <tuple>
@@ -118,7 +119,7 @@ public:
             return load_all<Wanted...>(open_file);
         }
     }
-    
+
     /**
      * Load an object of the given type from a stream.
      * The stream may be VPKG with the appropriate tag, or a bare non-VPKG stream understood by the loader.
@@ -127,12 +128,23 @@ public:
      */
     template<typename Wanted>
     static unique_ptr<Wanted> try_load_one(istream& in) {
-        if(!in) {
+        
+        istream* from_ptr = &in;
+        unique_ptr<streamistream> wrapper;
+        if (&in == &cin) {
+            // If reading from standard input, we buffer so magic number
+            // sniffing can do putback.
+            wrapper = make_unique<streamistream>(in);
+            from_ptr = wrapper.get();
+        }
+        auto& from = *from_ptr;
+        
+        if(!from) {
             // We can't open the file; return an empty pointer.
             return unique_ptr<Wanted>();
         }
         
-        if (!BlockedGzipInputStream::SmellsLikeGzip(in)) {
+        if (!BlockedGzipInputStream::SmellsLikeGzip(from)) {
             // This isn't compressed. It might be a bare file, empty, or uncompressed data.
             
             // TODO: We assume that if it starts with the GZIP magic number
@@ -156,15 +168,22 @@ public:
                 
 #ifdef debug
                 for (auto& loader_and_prefix : *bare_loaders) {
-                    cerr << "Can load from prefix: " << loader_and_prefix.second << endl;
+                    cerr << "Can load from prefix:";
+                    for (int c : loader_and_prefix.second) {
+                        cerr << " " << c;
+                    }
+                    cerr << endl;
                 }
 #endif
                 
+                // We might sniff a tag.
+                string sniffed_tag;
+                
                 // See if we have a seekable stream to try it on.
-                in.clear();
-                auto in_position = in.tellg();
-                bool in_good = in.good();
-                in.clear();
+                from.clear();
+                auto in_position = from.tellg();
+                bool in_good = from.good();
+                from.clear();
             
                 if (in_position >= 0 && in_good) {
                     // Stream porbably supports enough unget to sniff for a
@@ -175,35 +194,39 @@ public:
                     cerr << "Sniffing tag from stream" << endl;
 #endif
                     
-                    string sniffed_tag = MessageIterator::sniff_tag(in);
+                    sniffed_tag = MessageIterator::sniff_tag(from);
                     
 #ifdef debug
                     cerr << "Sniffed tag: " << sniffed_tag << endl;
 #endif
+                }
                     
-                    if (sniffed_tag.empty()) {
-                        // This isn't uncompressed tagged data. It could be empty or it
-                        // could be something in a bespoke format.
-                        
-                        for (auto& loader_and_prefix : *bare_loaders) {
-                            // Just linear scan through all the loaders
-                        
+                if (sniffed_tag.empty()) {
+                    // This isn't uncompressed tagged data. It could be empty or it
+                    // could be something in a bespoke format.
+                    
+                    for (auto& loader_and_prefix : *bare_loaders) {
+                        // Just linear scan through all the loaders
+                    
 #ifdef debug
-                            cerr << "Try loading with the bare loader for prefix " << loader_and_prefix.second << endl;
-#endif
-                            
-                            if (sniff_magic(in, loader_and_prefix.second)) {
-                                // Use the first prefix we find.
-                                // Up to the user to avoid prefix overlap.
-                                return unique_ptr<Wanted>((Wanted*)(loader_and_prefix.first)(in));
-                            }
+                        cerr << "Try loading with the bare loader for prefix ";
+                        for (int c : loader_and_prefix.second) {
+                            cerr << " " << c;
                         }
+                        cerr << endl;
+#endif
                         
-                        // If there's no matching bare loader, just keep going
-                        // and feed the (possibly empty or broken) file into
-                        // our real error-handling read code. 
-                            
+                        if (sniff_magic(from, loader_and_prefix.second)) {
+                            // Use the first prefix we find.
+                            // Up to the user to avoid prefix overlap.
+                            return unique_ptr<Wanted>((Wanted*)(loader_and_prefix.first)(from));
+                        }
                     }
+                    
+                    // If there's no matching bare loader, just keep going
+                    // and feed the (possibly empty or broken) file into
+                    // our real error-handling read code. 
+                        
                 }
             }
         }
@@ -215,7 +238,7 @@ public:
         //
         // We want to proceed with making a MessageIterator and using its error
         // reporting to diagnose any problems with the file.
-        MessageIterator it(in);
+        MessageIterator it(from);
         
 #ifdef debug
         cerr << "Iterator has a first item? " << it.has_current() << endl;
@@ -265,7 +288,7 @@ public:
             return make_default_or_null<Wanted>();
         }
     }
-    
+
     /**
      * Load an object of the given type from a file by name.
      * The stream may be VPKG with the appropriate tag, or a bare non-VPKG stream understood by the loader.
@@ -295,6 +318,8 @@ public:
      * The stream may be VPKG with the appropriate tag, or a bare non-VPKG stream understood by the loader.
      * Tagged messages that can't be used to load the thing we are looking for are skipped.
      * Ends the program with an error if the object could not be found in the stream.
+     *
+     * May consume trailing data from the stream.
      */
     template<typename Wanted>
     static unique_ptr<Wanted> load_one(istream& in) {
@@ -302,7 +327,7 @@ public:
             cerr << "error[VPKG::load_one]: Unreadable stream while loading " << describe<Wanted>() << endl;
             exit(1);
         }
-        
+
         // Read from it
         auto result = try_load_one<Wanted>(in);
         

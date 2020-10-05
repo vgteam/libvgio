@@ -19,6 +19,7 @@
  *
  * Version: Jul 28, 2002
  * History:
+ *  Oct 05, 2020: add stream-wrapping stream and up putback, use unnamespaced void* read/write
  *  Jan 29, 2019: namespace for vg project
  *  Jul 28, 2002: bugfix memcpy() => memmove()
  *                fdinbuf::underflow(): cast for return statements
@@ -42,8 +43,8 @@
 #else
 # include <unistd.h>
 //extern "C" {
-//    int write (int fd, const char* buf, int num);
-//    int read (int fd, char* buf, int num);
+//    int write (int fd, const void* buf, int num);
+//    int read (int fd, void* buf, int num);
 //}
 #endif
 
@@ -71,7 +72,7 @@ class fdoutbuf : public std::streambuf {
     virtual int_type overflow (int_type c) {
         if (c != EOF) {
             char z = c;
-            if (write (fd, &z, 1) != 1) {
+            if (::write(fd, (void*)&z, 1) != 1) {
                 return EOF;
             }
         }
@@ -81,7 +82,7 @@ class fdoutbuf : public std::streambuf {
     virtual
     std::streamsize xsputn (const char* s,
                             std::streamsize num) {
-        return write(fd,s,num);
+        return ::write(fd,(void*)s,num);
     }
 };
 
@@ -108,7 +109,7 @@ class fdinbuf : public std::streambuf {
      * - at most, pbSize characters in putback area plus
      * - at most, bufSize characters in ordinary read buffer
      */
-    static const int pbSize = 4;        // size of putback area
+    static const int pbSize = 1024;     // size of putback area
     static const int bufSize = 1024;    // size of the data buffer
     char buffer[bufSize+pbSize];        // data buffer
 
@@ -155,7 +156,7 @@ class fdinbuf : public std::streambuf {
 
         // read at most bufSize new characters
         int num;
-        num = read (fd, buffer+pbSize, bufSize);
+        num = ::read(fd, (void*)(buffer+pbSize), bufSize);
         if (num <= 0) {
             // ERROR or EOF
             return EOF;
@@ -176,6 +177,92 @@ class fdistream : public std::istream {
     fdinbuf buf;
   public:
     fdistream (int fd) : std::istream(0), buf(fd) {
+        rdbuf(&buf);
+    }
+};
+
+/************************************************************
+ * streamistream
+ * - a stream that reads on another stream (for additonal putback)
+ ************************************************************/
+
+class streaminbuf : public std::streambuf {
+  protected:
+    istream& other;    // file descriptor
+  protected:
+    /* data buffer:
+     * - at most, pbSize characters in putback area plus
+     * - at most, bufSize characters in ordinary read buffer
+     */
+    static const int pbSize = 1024;     // size of putback area
+    static const int bufSize = 1024;    // size of the data buffer
+    char buffer[bufSize+pbSize];        // data buffer
+
+  public:
+    /* constructor
+     * - initialize file descriptor
+     * - initialize empty data buffer
+     * - no putback area
+     * => force underflow()
+     */
+    streaminbuf (istream& _other) : other(_other) {
+        setg (buffer+pbSize,     // beginning of putback area
+              buffer+pbSize,     // read position
+              buffer+pbSize);    // end position
+    }
+
+  protected:
+    // insert new characters into the buffer
+    virtual int_type underflow () {
+#ifndef _MSC_VER
+        using std::memmove;
+#endif
+
+        // is read position before end of buffer?
+        if (gptr() < egptr()) {
+            return traits_type::to_int_type(*gptr());
+        }
+
+        /* process size of putback area
+         * - use number of characters read
+         * - but at most size of putback area
+         */
+        int numPutback;
+        numPutback = gptr() - eback();
+        if (numPutback > pbSize) {
+            numPutback = pbSize;
+        }
+
+        /* copy up to pbSize characters previously read into
+         * the putback area
+         */
+        memmove (buffer+(pbSize-numPutback), gptr()-numPutback,
+                numPutback);
+
+        // read at most bufSize new characters
+        int num;
+        other.read(buffer+pbSize, bufSize);
+        num = other.gcount();
+        if (num == 0 && !other.good()) {
+            // ERROR or EOF
+            return EOF;
+        }
+
+        // reset buffer pointers
+        setg (buffer+(pbSize-numPutback),   // beginning of putback area
+              buffer+pbSize,                // read position
+              buffer+pbSize+num);           // end of buffer
+
+        // return next character
+        return traits_type::to_int_type(*gptr());
+    }
+};
+
+class streamistream : public std::istream {
+  protected:
+    streaminbuf buf;
+  public:
+    streamistream (istream& other) : std::istream(0), buf(other) {
         rdbuf(&buf);
     }
 };
