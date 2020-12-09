@@ -123,9 +123,10 @@ add_library(vgio_static STATIC ${PROTO_SRCS} ${SOURCES})
 set_target_properties(vgio_static PROPERTIES OUTPUT_NAME vgio)
 set_property(TARGET vgio_static PROPERTY POSITION_INDEPENDENT_CODE OFF)
 
-# Don't build any object files until the Protobuf include symlink is set up
+# Don't build any object files until the Protobuf include symlink is set up and handlegraph is built
 add_dependencies(vgio link_target)
 add_dependencies(vgio_static link_target)
+add_dependencies(vgio handlegraph)
 
 # Add an alias so that library can be used inside the build tree, e.g. when testing
 add_library(VGio::vgio ALIAS vgio)
