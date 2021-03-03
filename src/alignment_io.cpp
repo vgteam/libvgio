@@ -377,10 +377,12 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length, fun
             }
         }
 
-        if (aln.properly_paired()) {
-            gaf.opt_fields["pd"] = make_pair("b", "1");
-        } else {
-            gaf.opt_fields["pd"] = make_pair("b", "0");
+        if (aln.has_annotation()) {
+            auto& annotation = aln.annotation();
+            if (annotation.fields().count("proper_pair")) {
+                bool is_properly_paired = (annotation.fields().at("proper_pair")).bool_value();
+            gaf.opt_fields["pd"] = make_pair("b", is_properly_paired ? "1" : "0");
+            }
         }
     }
 
@@ -523,7 +525,10 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length, function<string(ni
             aln.mutable_fragment_next()->set_name(opt_it.second.second);
         } else if (opt_it.first == "pd") {
             //Is this read properly paired
-            aln.set_properly_paired(opt_it.second.second == "1");
+            auto* annotation = aln.mutable_annotation();
+            google::protobuf::Value is_properly_paired;
+            is_properly_paired.set_bool_value(opt_it.second.second == "1");
+            annotation->mutable_fields()->at("proper_pair") = is_properly_paired;
         }
     }
 }
