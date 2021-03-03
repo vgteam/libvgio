@@ -528,7 +528,7 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length, function<string(ni
             auto* annotation = aln.mutable_annotation();
             google::protobuf::Value is_properly_paired;
             is_properly_paired.set_bool_value(opt_it.second.second == "1");
-            annotation->mutable_fields()->at("proper_pair") = is_properly_paired;
+            (*annotation->mutable_fields())["proper_pair"] = is_properly_paired;
         }
     }
 }
