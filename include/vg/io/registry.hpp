@@ -438,10 +438,9 @@ void Registry::register_bare_loader_saver_with_magics(const string& tag, const v
     
     for (auto& magic : magics) {
         // Register the bare stream loader for each magic
-        function<bool(istream&)> check_header = [&magic](istream& in_stream) {
-            return sniff_magic(in_stream, magic);  
-        };
-        register_bare_loader<Handled, Bases...>(loader, check_header);
+        register_bare_loader<Handled, Bases...>(loader, [magic](istream& in_stream) {
+                return sniff_magic(in_stream, magic);  
+            });
     }
 }
 
