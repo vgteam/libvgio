@@ -4,7 +4,7 @@
 /**
  * \file vpkg.hpp: frontend load/save interface for multi-type type-tagged files
  */
- 
+
 #include "registry.hpp"
 #include "message_iterator.hpp"
 #include "message_emitter.hpp"
@@ -167,13 +167,7 @@ public:
                 // Bare load is possible, if we have the righht prefix.
                 
 #ifdef debug
-                for (auto& loader_and_prefix : *bare_loaders) {
-                    cerr << "Can load from prefix:";
-                    for (int c : loader_and_prefix.second) {
-                        cerr << " " << c;
-                    }
-                    cerr << endl;
-                }
+                cerr << "Checking " << bare_loaders->size() << " bare loaders" << endl;
 #endif
                 
                 // We might sniff a tag.
@@ -208,19 +202,13 @@ public:
                     for (auto& loader_and_prefix : *bare_loaders) {
                         // Just linear scan through all the loaders
                     
-#ifdef debug
-                        cerr << "Try loading with the bare loader for prefix ";
-                        for (int c : loader_and_prefix.second) {
-                            cerr << " " << c;
-                        }
-                        cerr << endl;
-#endif
-                        
-                        if (sniff_magic(from, loader_and_prefix.second)) {
-                            // Use the first prefix we find.
+                        auto check_header_fn = loader_and_prefix.second;
+                        if (check_header_fn != nullptr && check_header_fn(from)) {
+                            // Use the first prefix-match we find.
                             // Up to the user to avoid prefix overlap.
                             return unique_ptr<Wanted>((Wanted*)(loader_and_prefix.first)(from));
                         }
+                        // todo: do we need to do something if check_header_fn is null? 
                     }
                     
                     // If there's no matching bare loader, just keep going
@@ -598,13 +586,6 @@ private:
     static typename std::enable_if<!std::is_default_constructible<T>::value, unique_ptr<T>>::type make_default_or_null() {
         return unique_ptr<T>(nullptr);
     }
-    
-    /**
-     * Return true of the given stream starts with the given magic number
-     * prefix, and false otherwise. Returns the stream to its initial position
-     * regardless of the result.
-     */
-    static bool sniff_magic(istream& stream, const string& magic);
 };
 
 }

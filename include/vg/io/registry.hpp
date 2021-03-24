@@ -156,6 +156,15 @@ public:
     template<typename Handled, typename... Bases>
     static void register_bare_loader_saver_with_magics(const string& tag, const vector<string>& magics,
         bare_load_function_t loader, bare_save_function_t saver);
+
+    /**
+     * Generealization of register_bare_loader_saver_with_magic, where user can supply their
+     * own header-checking function.  
+     */
+    template<typename Handled, typename... Bases>
+    static void register_bare_loader_saver_with_header_check(const string& tag,
+        function<bool(istream&)> check_header,
+        bare_load_function_t loader, bare_save_function_t saver);    
         
     /**
      * Register a load function for a tag. The empty tag means it can run on
@@ -209,6 +218,13 @@ public:
     static bool check_protobuf_tag(const string& tag);
 
     /**
+     * Return true of the given stream starts with the given magic number
+     * prefix, and false otherwise. Returns the stream to its initial position
+     * regardless of the result.
+     */
+    static bool sniff_magic(istream& stream, const string& magic);
+
+    /**
      * Look up the appropriate loader function to use to load an object of the
      * given type from data with the given tag. If there is one registered,
      * return a pointer to it. The caller has to call it and cast the result to
@@ -226,7 +242,7 @@ public:
      * functions available, returns nullptr.
      */
     template<typename Want>
-    static const vector<pair<bare_load_function_t, string>>* find_bare_loaders();
+    static const vector<pair<bare_load_function_t, function<bool(istream&)>>>* find_bare_loaders();
     
     /**
      * Look up the appropriate saver function to use to save an object of the
@@ -256,8 +272,8 @@ private:
         
         /// Maps from type_index we want to load from a old,
         /// non-tagged-message-format file to a list of "bare" loaders that can load the
-        /// desired thing from an istream, and their possibly empty required prefixes.
-        unordered_map<type_index, vector<pair<bare_load_function_t, string>>> type_to_bare_loaders;
+        /// desired thing from an istream, and their possibly empty required-prefix-sniffer-functions.
+        unordered_map<type_index, vector<pair<bare_load_function_t, function<bool(istream&)>>>> type_to_bare_loaders;
     };
     
     /**
@@ -277,7 +293,8 @@ private:
      * prefix, which is retained in the stream data. 
      */
     template<typename Handled, typename... Bases>
-    static void register_bare_loader(bare_load_function_t loader, const string& prefix = "");
+    static void register_bare_loader(bare_load_function_t loader,
+                                     function<bool(istream&)> sniff_header = nullptr);
     
     /**
      * Register a save function to save a type with a given tag. The empty tag
@@ -336,16 +353,16 @@ void Registry::register_loader(const std::vector<std::string>& tags, load_functi
 }
 
 template<typename Handled, typename... Bases>
-void Registry::register_bare_loader(bare_load_function_t loader, const string& prefix) {
+void Registry::register_bare_loader(bare_load_function_t loader, function<bool(istream&)> check_header) {
     // Get our state
     Tables& tables = get_tables();
     
     // Save the loading function to load the given type
-    tables.type_to_bare_loaders[type_index(typeid(Handled))].emplace_back(loader, prefix);
+    tables.type_to_bare_loaders[type_index(typeid(Handled))].emplace_back(loader, check_header);
 
     // And for the base classes.
     // Expand over all the base types in an initializer list and use an assignment expression to fill a dummy vector.
-    std::vector<int> dummy{(tables.type_to_bare_loaders[type_index(typeid(Bases))].emplace_back(loader, prefix), 0)...};
+    std::vector<int> dummy{(tables.type_to_bare_loaders[type_index(typeid(Bases))].emplace_back(loader, check_header), 0)...};
 }
 
 template<typename Handled>
@@ -399,7 +416,7 @@ void Registry::register_bare_loader_saver(const string& tag, bare_load_function_
     register_loader_saver<Handled, Bases...>(tag, wrap_bare_loader(loader), wrap_bare_saver(saver));
     
     // Register the bare stream loader
-    register_bare_loader<Handled>(loader, "");
+    register_bare_loader<Handled>(loader, nullptr);
 
 }
 
@@ -421,8 +438,22 @@ void Registry::register_bare_loader_saver_with_magics(const string& tag, const v
     
     for (auto& magic : magics) {
         // Register the bare stream loader for each magic
-        register_bare_loader<Handled, Bases...>(loader, magic);
+        function<bool(istream&)> check_header = [&magic](istream& in_stream) {
+            return sniff_magic(in_stream, magic);  
+        };
+        register_bare_loader<Handled, Bases...>(loader, check_header);
     }
+}
+
+template<typename Handled, typename... Bases>
+void Registry::register_bare_loader_saver_with_header_check(const string& tag, function<bool(istream&)> check_header,
+    bare_load_function_t loader, bare_save_function_t saver) {
+
+    // Register the type-tagged wrapped functions
+    register_loader_saver<Handled, Bases...>(tag, wrap_bare_loader(loader), wrap_bare_saver(saver));
+
+    // Register the bare stream loader with header check
+    register_bare_loader<Handled, Bases...>(loader, check_header);
 }
 
 template<typename Want>
@@ -455,7 +486,7 @@ const load_function_t* Registry::find_loader(const string& tag) {
 }
 
 template<typename Want>
-const vector<pair<bare_load_function_t, string>>* Registry::find_bare_loaders() {
+const vector<pair<bare_load_function_t, function<bool(istream&)>>>* Registry::find_bare_loaders() {
     // Get our state
     Tables& tables = get_tables();
     
