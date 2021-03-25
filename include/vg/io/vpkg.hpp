@@ -205,12 +205,13 @@ public:
                         // Just linear scan through all the loaders
                     
                         auto check_header_fn = loader_and_prefix.second;
-                        if (check_header_fn != nullptr && check_header_fn(from)) {
+                        // Note: previous logic returned true for empty magic numbers,
+                        // so accepting nullptr here does the same
+                        if (check_header_fn == nullptr || check_header_fn(from)) {
                             // Use the first prefix-match we find.
                             // Up to the user to avoid prefix overlap.
                             return unique_ptr<Wanted>((Wanted*)(loader_and_prefix.first)(from, filename));
                         }
-                        // todo: do we need to do something if check_header_fn is null? 
                     }
                     
                     // If there's no matching bare loader, just keep going
