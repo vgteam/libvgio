@@ -125,9 +125,11 @@ public:
      * The stream may be VPKG with the appropriate tag, or a bare non-VPKG stream understood by the loader.
      * Tagged messages that can't be used to load the thing we are looking for are skipped.
      * This doesn't work for Protobuf messages directly, but it will work for e.g. vg::VG.
+     * filename is optional, and can be used by callback code that may, for some reason,
+     * want to link the stream back to a path (cough cough GFA loader cough cough)
      */
     template<typename Wanted>
-    static unique_ptr<Wanted> try_load_one(istream& in) {
+    static unique_ptr<Wanted> try_load_one(istream& in, const string& filename = "") {
         
         istream* from_ptr = &in;
         unique_ptr<streamistream> wrapper;
@@ -206,7 +208,7 @@ public:
                         if (check_header_fn != nullptr && check_header_fn(from)) {
                             // Use the first prefix-match we find.
                             // Up to the user to avoid prefix overlap.
-                            return unique_ptr<Wanted>((Wanted*)(loader_and_prefix.first)(from));
+                            return unique_ptr<Wanted>((Wanted*)(loader_and_prefix.first)(from, filename));
                         }
                         // todo: do we need to do something if check_header_fn is null? 
                     }
@@ -297,7 +299,7 @@ public:
             ifstream open_file(filename.c_str());
             
             // Read from it
-            return try_load_one<Wanted>(open_file);
+            return try_load_one<Wanted>(open_file, filename);
         }
     }
     
@@ -310,14 +312,14 @@ public:
      * May consume trailing data from the stream.
      */
     template<typename Wanted>
-    static unique_ptr<Wanted> load_one(istream& in) {
+    static unique_ptr<Wanted> load_one(istream& in, const string& filename = "") {
         if (!in) {
             cerr << "error[VPKG::load_one]: Unreadable stream while loading " << describe<Wanted>() << endl;
             exit(1);
         }
 
         // Read from it
-        auto result = try_load_one<Wanted>(in);
+        auto result = try_load_one<Wanted>(in, filename);
         
         if (result.get() == nullptr) {
             cerr << "error[VPKG::load_one]: Correct input type not found while loading " << describe<Wanted>() << endl;
@@ -370,7 +372,7 @@ public:
             }
             
             // Read the file.
-            auto result = try_load_one<Wanted>(in);
+            auto result = try_load_one<Wanted>(in, filename);
             
             if (result.get() == nullptr) {
                 cerr << "error[VPKG::load_one]: Correct input type not found in " << filename << " while loading " << describe<Wanted>() << endl;
