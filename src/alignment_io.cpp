@@ -212,7 +212,7 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length, fun
         //7 int Path length
         gaf.path_length = 0;
         //8 int Start position on the path (0-based)
-        gaf.path_start = 0;
+        gaf.path_start = gafkluge::missing_int;
         //10 int Number of residue matches
         gaf.matches = 0;
         gaf.path.reserve(aln.path().mapping_size());
@@ -323,8 +323,13 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length, fun
             
             if (i == aln.path().mapping_size()-1) {
                 //9 int End position on the path (0-based)
-                gaf.path_end = offset;
-                assert(gaf.path_end >= 0);
+                gaf.path_end = gaf.path_start;
+                if (gaf.path_length > offset) {
+                    assert(!gafkluge::is_missing(gaf.path_start));
+                    // path_length - 1 marks the last position of our path.  we subtract out
+                    // the regions between offset and here to get the end
+                    gaf.path_end = gaf.path_length - 1 - (node_to_length(position.node_id()) - offset);
+                }
             }
 
             prev_offset = offset;
