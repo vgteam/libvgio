@@ -445,7 +445,6 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length, function<string(ni
                     from_cg = true;
                 }
 
-                // note: without bases, we don't bother distinguishing between the 3 different cg tags below.
                 if (cigar_cat == ':' || cigar_cat == 'M' || cigar_cat == '=' || cigar_cat == 'X') {
                     int64_t match_len = (int64_t)cigar_len;
                     while (match_len > 0) {
@@ -453,6 +452,10 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length, function<string(ni
                         Edit* edit = aln.mutable_path()->mutable_mapping(cur_mapping)->add_edit();
                         edit->set_from_length(current_match);
                         edit->set_to_length(current_match);
+                        if (cigar_cat == 'X') {
+                            // add a phony snp
+                            edit->set_sequence(string(current_match, 'N'));
+                        }
                         if (node_to_sequence) {
                             sequence += node_to_sequence(cur_position.node_id(), cur_position.is_reverse()).substr(cur_offset, current_match);
                         }
