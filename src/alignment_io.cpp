@@ -437,9 +437,13 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length, function<string(ni
         Position cur_position = aln.path().mapping(cur_mapping).position();
         size_t cur_len = node_to_length(cur_position.node_id());
         string& sequence = *aln.mutable_sequence();
+        bool from_cg = false;
         // Use the CS cigar string to add Edits into our Path, as well as set the sequence
         gafkluge::for_each_cigar(gaf, [&] (const char& cigar_cat, const size_t& cigar_len, const string& cigar_query, const string& cigar_target) {
                 assert(cur_offset < cur_len || ((cigar_cat == '+' || cigar_cat == 'I' || cigar_cat == 'S') && cur_offset <= cur_len));
+                if (!from_cg && cigar_cat != ':' && cigar_cat != '+' && cigar_cat != '-' && cigar_cat != '*') {
+                    from_cg = true;
+                }
 
                 // note: without bases, we don't bother distinguishing between the 3 different cg tags below.
                 if (cigar_cat == ':' || cigar_cat == 'M' || cigar_cat == '=' || cigar_cat == 'X') {
@@ -516,6 +520,13 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length, function<string(ni
                     }
                 }
             });
+        if (from_cg) {
+            // remember that we came from a lossy cg-cigar -> GAM conversion path
+            auto* annotation = aln.mutable_annotation();
+            google::protobuf::Value is_from_cg;
+            is_from_cg.set_bool_value(from_cg);
+            (*annotation->mutable_fields())["from_cg"] = is_from_cg;
+        }
     }
 
     for (auto opt_it : gaf.opt_fields) {
