@@ -484,16 +484,23 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length, function<string(ni
                     }
                     sequence += edit->sequence();
                 } else if (cigar_cat == '-' || cigar_cat == 'D') {
-                    assert(cigar_len <= node_to_length(cur_position.node_id()) - cur_offset);
-                    if (cigar_cat == '-') {
-                        assert(!node_to_sequence || cigar_target == node_to_sequence(cur_position.node_id(), cur_position.is_reverse()).substr(cur_offset, cigar_target.length()));
+                    int64_t del_len = (int64_t)cigar_len;
+                    while (del_len > 0) {
+                        int64_t current_del = std::min(del_len, (int64_t)node_to_length(cur_position.node_id()) - cur_offset);
+                        Edit* edit = aln.mutable_path()->mutable_mapping(cur_mapping)->add_edit();
+                        edit->set_to_length(0);
+                        edit->set_from_length(current_del);
+                        del_len -= current_del;
+                        cur_offset += current_del;
+                        // like matches, we allow deletions to span multiple nodes now.
+                        if (del_len > 0) {
+                            assert(cur_mapping < aln.path().mapping_size() - 1);
+                            ++cur_mapping;
+                            cur_offset = 0;
+                            cur_position = aln.path().mapping(cur_mapping).position();
+                            cur_len = node_to_length(cur_position.node_id());
+                        }
                     }
-                    Edit* edit = aln.mutable_path()->mutable_mapping(cur_mapping)->add_edit();
-                    edit->set_to_length(0);
-                    edit->set_from_length(cigar_len);
-                    cur_offset += cigar_len;
-                    // unlike matches, we don't allow deletions to span multiple nodes
-                    assert(cur_offset <= node_to_length(cur_position.node_id()));
                 } else if (cigar_cat == '*') {
                     assert(cigar_len == 1);
                     assert(!node_to_sequence || node_to_sequence(cur_position.node_id(), cur_position.is_reverse()).substr(cur_offset,1) == cigar_target);
