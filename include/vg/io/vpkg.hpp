@@ -26,264 +26,128 @@ namespace io {
 using namespace std;
 
 /**
- * Interface for reading/writing type-tagged files.
+ * Interface for reading/writing files.
  *
- * Allows you to load a HandleGraph from a file with the implementation being
- * auto-selected based on what is in the file.
+ * Originally designed for Protobuf-based type-tagged files with optional BGZIP
+ * compression.
  *
- * Allows you to load multiple indexes or objects from the same file, as they
- * are found.
+ * Now mostly used for files identified by prefixes or sniffing functions.
  *
- * Allows saving multiple indexes or objects to a file with one call.
+ * Allows you to load e.g. a HandleGraph from a file with the implementation
+ * being auto-selected based on what is in the file.
  */
 class VPKG {
 public:
+    
     /**
-     * Allocate and load one or more objects from the given stream on a single pass.
-     * Returns a tuple of pointers to loaded objects, or null if they could not be found.
-     * Only works on VPKG-formatted files.
-     * TODO: Probably ought to fail if something isn't found!
+     * Allocate and load an available type from the given stream.
+     * Returns a tuple where at most one item is filled, and that item is the
+     * first type we could successfully load out of the template parameters,
+     * except that bare loaders are prioritized over encapsulated ones.
+     *
+     * filename is optional, and can be used by callback code that may, for
+     * some reason, want to link the stream back to a path (cough cough GFA
+     * loader cough cough)
      */
     template<typename... Wanted>
-    static tuple<unique_ptr<Wanted>...> load_all(istream& in) {
-         // Make an iterator
-        MessageIterator it(in);
+    static tuple<unique_ptr<Wanted>...> try_load_first(istream& in, const string& filename = "") {
+        // We will fill this in if we manage to load the thing
+        tuple<unique_ptr<Wanted>...> results;
         
-        // Create a collection of null void*s that will hold the allocated objects we want to load when we think we can load them.
-        deque<void*> to_fill { (void*)(Wanted*)nullptr... };
-        
-        // We set this to false if we should stop calling the loaders because we hit EOF or they all loaded.
-        bool keep_going = true;
-
-        do {
-
-            // We exploit initializer list evaluation order to be able to tell
-            // individual calls resulting from a ... variadic template argument
-            // expansion what number they are, so they can index into a data
-            // structure. See https://stackoverflow.com/a/21194071
-            size_t index = 0;
+        // Use one unified unget setup to not consume any stream in the subcalls.
+        with_putback(in, [&](istream& from) {
+            // First try a bare loader
+            results = std::move(try_load_first_bare<Wanted...>(from, filename));
             
-            // Call the load function for each type, and get the statuses
-            vector<LoadProgress> load_statuses { load_into_one<Wanted>(it, index++, to_fill)... };
-            
-            // We keep this true if we should skip the current tag because all
-            // the loaders looked at and rejected it with LOAD_SEARCHING or are
-            // LOAD_FINISHED. So we set it false if anybody is LOAD_SUCCESS.
-            bool skip_tag = true;
-            
-            // We keep this false if all the loaders are LOAD_FINISHED.
-            keep_going = false;
-            
-            for (auto status : load_statuses) {
-                if (status != LOAD_FINISHED) {
-                    // Somebody wants to keep going
-                    keep_going = true;
-                }
-                
-                if (status == LOAD_SUCCESS) {
-                    // We made progress, so don't skip the tag.
-                    skip_tag = false;
-                }
+            if (!any_filled<Wanted...>(result)) {
+                // If that doesn't work, try loading as encapsulated type-tagged data
+                result = std::move(try_load_first_encapsulated<Wanted...>(from));
             }
-            
-            if (keep_going && skip_tag) {
-                // Nobody made progress, so skip all messages tagged with the current tag
-                string to_skip = (*it).first;
-                while (it.has_current() && (*it).first == to_skip) {
-                    ++it;
-                }
-            }
-            
-            // Loop until everybody is quiescent.
-        } while (keep_going);
-        
-        // Now all the unique_ptrs that can be filled in are filled in.
-        // Convert to a tuple and return.
-        return to_tuple<Wanted...>(to_fill);
+        });
     }
     
     /**
-     * Allocate and load one or more objects from the given file on a single pass.
-     * Returns a tuple of pointers to loaded objects, or null if they could not be found.
-     * Only works on VPKG-formatted files. Supports "-" for standard input.
+     * Return true if any of the elements at the given indices in the given tuple are filled.
+     */
+    template<typename Wanted..., size_t... Indices>
+    bool any_filled_impl(const tuple<unique_ptr<Wanted>...>& t, std::index_sequence<Indices...>) {
+        auto mapreduce = [](auto... elements) -> bool {
+            return max({((bool)elements)...});
+        };
+        
+        return mapreduce(get<Indices>(t)...);
+    }
+    
+    /**
+     * Return true if any of the elements at the indices under the given value in the given tuple are filled.
+     */
+    template<typename Wanted..., size_t IndexCount = std::tuple_size<tuple<unique_ptr<Wanted>...>::value>, typename Indices = std::make_index_sequence<IndexCount>>
+    bool any_filled(const tuple<unique_ptr<Wanted>...>& t) {
+        return any_filled_impl(t, Indices{});
+    }
+    
+    /**
+     * Allocate and load the first available type from the given stream.
+     * Returns a tuple where at most one item is filled, and that item is the
+     * first type we could successfully load out of the template parameters.
+     *
+     * If any type is to be loaded from type-tagged messages, it must come
+     * first, or its type-tagged messages may be skipped when looking for
+     * higher-priority types.
      */
     template<typename... Wanted>
-    static tuple<unique_ptr<Wanted>...> load_all(const string& filename) {
+    static tuple<unique_ptr<Wanted>...> try_load_first(const string& filename) {
+        if (filename.empty()) {
+            // There's no file here, so fail by returning an empty tuple.
+            return tuple<unique_ptr<Wanted>...>();
+        }
+        
         if (filename == "-") {
-            return load_all<Wanted...>(cin);
+            return try_load_first<Wanted...>(cin);
         } else {
             // Open the file
             ifstream open_file(filename.c_str());
             
             // Read from it
-            return load_all<Wanted...>(open_file);
+            return try_load_first<Wanted...>(open_file, filename);
         }
     }
-
+    
     /**
-     * Load an object of the given type from a stream.
-     * The stream may be VPKG with the appropriate tag, or a bare non-VPKG stream understood by the loader.
-     * Tagged messages that can't be used to load the thing we are looking for are skipped.
-     * This doesn't work for Protobuf messages directly, but it will work for e.g. vg::VG.
-     * filename is optional, and can be used by callback code that may, for some reason,
-     * want to link the stream back to a path (cough cough GFA loader cough cough)
+     * Load an object of the given type from a file.
+     * The stream may be VPKG with the appropriate tag, or a bare non-VPKG
+     * stream understood by the loader.
+     *
+     * Tagged messages that can't be used to load the thing we are looking for
+     * may or may not be consumed, so you should not call this function in a
+     * loop over types on the same stream.
+     *
+     * filename is optional, and can be used by callback code that may, for
+     * some reason, want to link the stream back to a path (cough cough GFA
+     * loader cough cough) 
      */
     template<typename Wanted>
     static unique_ptr<Wanted> try_load_one(istream& in, const string& filename = "") {
+        // We will fill this in if we manage to load the thing
+        unique_ptr<Wanted> result;
         
-        istream* from_ptr = &in;
-        unique_ptr<streamistream> wrapper;
-        if (&in == &cin) {
-            // If reading from standard input, we buffer so magic number
-            // sniffing can do putback.
-            wrapper = make_unique<streamistream>(in);
-            from_ptr = wrapper.get();
-        }
-        auto& from = *from_ptr;
-        
-        if(!from) {
-            // We can't open the file; return an empty pointer.
-            return unique_ptr<Wanted>();
-        }
-        
-        if (!BlockedGzipInputStream::SmellsLikeGzip(from)) {
-            // This isn't compressed. It might be a bare file, empty, or uncompressed data.
+        // Use one unified unget setup to not consume any stream in the subcalls.
+        with_putback(in, [&](istream& from) {
+            // First try a bare loader
+            result = std::move(try_load_bare<Wanted>(from, filename));
             
-            // TODO: We assume that if it starts with the GZIP magic number
-            // (0x1F 0x8B) it is GZIP'd (possibly BGZF) type-tagged message
-            // data. For some of our old formats that didn't include their own
-            // leading magic numbers (GCSA, LCP), this may not be true!
-            
-            // It's not safe to try and sniff the tag unless the stream is seekable and we can back up.
-            // For unseekable streams we assume we have VPKG data. For seekable ones we support bare loaders as well.
-            
-            // Check if the thing we want can be loaded from a bare stream, and
-            // if so what functions do it and what prefixes they require.
-            auto* bare_loaders = Registry::find_bare_loaders<Wanted>();
-            
-#ifdef debug
-            cerr << "Bare loaders for " << describe<Wanted>() << ": " << bare_loaders << endl;
-#endif
-            
-            if (bare_loaders != nullptr) {
-                // Bare load is possible, if we have the righht prefix.
-                
-#ifdef debug
-                cerr << "Checking " << bare_loaders->size() << " bare loaders" << endl;
-#endif
-                
-                // We might sniff a tag.
-                string sniffed_tag;
-                
-                // See if we have a seekable stream to try it on.
-                from.clear();
-                auto in_position = from.tellg();
-                bool in_good = from.good();
-                from.clear();
-            
-                if (in_position >= 0 && in_good) {
-                    // Stream porbably supports enough unget to sniff for a
-                    // tag, so we can decide if the bare loader is correct to
-                    // use.
-                    
-#ifdef debug
-                    cerr << "Sniffing tag from stream" << endl;
-#endif
-                    
-                    sniffed_tag = MessageIterator::sniff_tag(from);
-                    
-#ifdef debug
-                    cerr << "Sniffed tag: " << sniffed_tag << endl;
-#endif
-                }
-                    
-                if (sniffed_tag.empty()) {
-                    // This isn't uncompressed tagged data. It could be empty or it
-                    // could be something in a bespoke format.
-                    
-                    for (auto& loader_and_prefix : *bare_loaders) {
-                        // Just linear scan through all the loaders
-                    
-                        auto check_header_fn = loader_and_prefix.second;
-                        // Note: previous logic returned true for empty magic numbers,
-                        // so accepting nullptr here does the same
-                        if (check_header_fn == nullptr || check_header_fn(from)) {
-                            // Use the first prefix-match we find.
-                            // Up to the user to avoid prefix overlap.
-                            return unique_ptr<Wanted>((Wanted*)(loader_and_prefix.first)(from, filename));
-                        }
-                    }
-                    
-                    // If there's no matching bare loader, just keep going
-                    // and feed the (possibly empty or broken) file into
-                    // our real error-handling read code. 
-                        
-                }
+            if (!result) {
+                // If that doesn't work, try loading as encapsulated type-tagged data
+                result = std::move(try_load_encapsulated<Wanted>(from));
             }
-        }
+        });
         
-        // If we get here, either it is GZIP-compressed, or there is no bare
-        // loader, or the inout stream is unseekable (so we can't sniff to see
-        // if we want to use the bare loader), or the stream is seekable and we
-        // sniffed and it looks like uncompressed VPKG with a valid tag.
-        //
-        // We want to proceed with making a MessageIterator and using its error
-        // reporting to diagnose any problems with the file.
-        MessageIterator it(from);
-        
-#ifdef debug
-        cerr << "Iterator has a first item? " << it.has_current() << endl;
-#endif
-        
-        if (it.has_current()) {
-            // File is not empty
-        
-            while (it.has_current()) {
-                // Scan through kinds of tagged messages
-                string current_tag = (*it).first;
-                
-#ifdef debug
-                cerr << "Iterator found tag \"" << current_tag << "\"" << endl;
-#endif
-                
-                // See if we have one that has a registered loader for this type.
-                auto* loader = Registry::find_loader<Wanted>(current_tag);
-                
-#ifdef debug
-                cerr << "Loader for " << describe<Wanted>() << " from that tag: " << loader << endl;
-#endif
-                
-                if (loader == nullptr) {
-                    // Skip all these messages with this tag
-                    while (it.has_current() && (*it).first == current_tag) {
-                        ++it;
-                    }
-                } else {
-                    // Load with it and return a unique_ptr for the result.
-                    return unique_ptr<Wanted>((Wanted*)(*loader)([&](const message_consumer_function_t& handle_message) {
-                        while (it.has_current() && (*it).first == current_tag) {
-                            // Feed in messages from the file until we run out or the tag changes
-                            if ((*it).second.get() != nullptr) {
-                                handle_message(*((*it).second));
-                            }
-                            ++it;
-                        }
-                    }));
-                }
-            }
-            
-            // If we get here, nothing with an appropriate tag could be found, and it wasn't a bare loadable file.
-            return unique_ptr<Wanted>(nullptr);
-        } else {
-            // If the file is empty, default construct if possible. Else return null.
-            return make_default_or_null<Wanted>();
-        }
-    }
-
+        return result;
+     }
+    
     /**
      * Load an object of the given type from a file by name.
      * The stream may be VPKG with the appropriate tag, or a bare non-VPKG stream understood by the loader.
-     * Tagged messages that can't be used to load the thing we are looking for are skipped.
      * Returns null if the object could not be found in the file. Supports "-" for standard input.
      */
     template<typename Wanted>
@@ -294,7 +158,7 @@ public:
         }
         
         if (filename == "-") {
-            return try_load_one<Wanted>(cin);
+            return try_load_one<Wanted>(cin, "");
         } else {
             // Open the file
             ifstream open_file(filename.c_str());
@@ -451,91 +315,340 @@ public:
 private:
 
     /**
-     * Return type to represent whether the loader is making progress. Lets us
-     * know when we have loaded items vs. when nobody has anything to load so
-     * we can skip unwanted sections.
+     * Allocate and load the first available type from the given stream, using
+     * a bare loader. Returns a tuple where at most one item is filled, and
+     * that item is the first type we could successfully load out of the
+     * template parameters.
+     *
+     * filename is optional, and can be used by callback code that may, for
+     * some reason, want to link the stream back to a path (cough cough GFA
+     * loader cough cough)
      */
-    enum LoadProgress {
-        LOAD_SUCCESS,
-        LOAD_FINISHED,
-        LOAD_SEARCHING
-    };
-
-    /**
-     * Given a collection of void pointers, give ownership of the objects they point to, if any, to unique_ptrs in a tuple.
-     */
-    template<typename... TupleTypes>
-    static tuple<unique_ptr<TupleTypes>...> to_tuple(deque<void*> items) {
-        // Use initializer list expansion to repeatedly pop the first thing off the collection and type it correctly.
-        tuple<unique_ptr<TupleTypes>...> to_return { extract_first<TupleTypes>(items)... };
-        return to_return;
+    template<typename FirstPriority, typename SecondPriority, typename... Rest>
+    static tuple<unique_ptr<FirstPriority>, unique_ptr<SecondPriority>, unique_ptr<Rest>...> try_load_first_bare(istream& in, const string& filename = "") {
+    
+        // We will load to here if we can
+        tuple<unique_ptr<FirstPriority>> first_result;
+        // And to here if we can't
+        tuple<unique_ptr<SecondPriority>, unique_ptr<Rest>...> remaining_results;
+        
+        // Use one unified unget setup to not consume any stream in the subcalls.
+        with_putback(in, [&](istream& from) {
+           
+            // Try and load the best thing. If we find a weird VPKG tag, don't skip over it.
+            get<0>(first_result) = std::move(try_load_bare<FirstPriority>(in, filename));
+            
+            if (!get<0>(first_result)) {
+                // It wasn't there.
+                
+                // Try the (nonempty) others
+                remaining_results = std::move(try_load_first_bare<SecondPriority, Rest...>(in, filename));
+            }
+        }
+        
+        return tuple_cat(std::move(first_result), std::move(remaining_results));
     }
     
     /**
-     * Pop off the first item in the given collection and wrap it in a typed unique_ptr.
+     * Allocate and load the first available type from the given stream, using
+     * a bare loader. Returns a tuple where at most one item is filled, and
+     * that item is the first type we could successfully load out of the
+     * template parameters.
+     *
+     * filename is optional, and can be used by callback code that may, for
+     * some reason, want to link the stream back to a path (cough cough GFA
+     * loader cough cough)
      */
-    template<typename Pointed>
-    static unique_ptr<Pointed> extract_first(deque<void*>& pointers) {
-        // Grab off the first thing
-        void* got = pointers.front();
-        pointers.pop_front();
-        // Wrap it in a properly typed unique_ptr;
-        return unique_ptr<Pointed>((Pointed*) got);
+    template<typename Only>
+    static tuple<unique_ptr<Only>> try_load_first_bare(istream& in, const string& filename = "") {
+        return make_tuple(try_load_bare<Only>(in, filename));
+    }
+    
+    /**
+     * Allocate and load the first available type from the given iterator, using
+     * a bare loader. Returns a tuple where at most one item is filled, and
+     * that item is the first type we could successfully load out of the
+     * template parameters.
+     */
+    template<typename FirstPriority, typename SecondPriority, typename... Rest>
+    static tuple<unique_ptr<FirstPriority>, unique_ptr<SecondPriority>, unique_ptr<Rest>...> try_load_first_encapsulated(MessageIterator& it) {
+    
+        // We will load to here if we can
+        tuple<unique_ptr<FirstPriority>> first_result;
+        // And to here if we can't
+        tuple<unique_ptr<SecondPriority>, unique_ptr<Rest>...> remaining_results;
+        
+        // Use one unified unget setup to not consume any stream in the subcalls.
+        with_putback(in, [&](istream& from) {
+           
+            // Try and load the best thing. If we find a weird VPKG tag, don't skip over it.
+            get<0>(first_result) = std::move(try_load_encapsulated<FirstPriority>(it));
+            
+            if (!get<0>(first_result)) {
+                // It wasn't there.
+                
+                // Try the (nonempty) others
+                remaining_results = std::move(try_load_first_encapsulated<SecondPriority, Rest...>(it));
+            }
+        }
+        
+        return tuple_cat(std::move(first_result), std::move(remaining_results));
+    }
+    
+    /**
+     * Allocate and load the first available type from the given iterator, using
+     * a VPKG-encapsulated loader. Returns a tuple where at most one item is
+     * filled, and that item is the first type we could successfully load out
+     * of the template parameters.
+     */
+    template<typename Only>
+    static tuple<unique_ptr<Only>> try_load_first_encapsulated(MessageIterator& it) {
+        return make_tuple(try_load_encapsulated<Only>(it));
     }
 
     /**
-     * If the null slot at index i in the given collection of void*s can be
-     * filled with an object of type One from the given MessageIterator, fill
-     * it.
-     * 
-     * Returns LOAD_SUCCESS if it finds and loads something, LOAD_FINISHED if
-     * it is filled in or hits EOF, and LOAD_SEARCHING if it is still unfilled
-     * but can't be loaded from the current tag.
+     * Allocate and load the first available type from the given stream.
+     * Returns a tuple where at most one item is filled, and that item is the
+     * first type we could successfully load out of the template parameters.
+     *
+     * If any type is to be loaded from type-tagged messages, it must come
+     * first, or its type-tagged messages may be skipped when looking for
+     * higher-priority types.
+     *
+     * filename is optional, and can be used by callback code that may, for
+     * some reason, want to link the stream back to a path (cough cough GFA
+     * loader cough cough)
      */
-    template<typename One>
-    static LoadProgress load_into_one(MessageIterator& it, size_t i, deque<void*>& dest) {
-        // Find the slot to load into
-        void*& slot = dest[i];
+    template<typename FirstPriority, typename SecondPriority, typename... Rest>
+    static tuple<unique_ptr<FirstPriority>, unique_ptr<SecondPriority>, unique_ptr<Rest>...> try_load_first(istream& in, const string& filename = "") {
         
-        if (slot != nullptr) {
-            // If it's already loaded, we're done
-            return LOAD_FINISHED;
-        }
+        // We will load to here if we can
+        tuple<unique_ptr<FirstPriority>> first_result;
+        // And to here if we can't
+        tuple<unique_ptr<SecondPriority>, unique_ptr<Rest>...> remaining_results;
+       
+        // See if we have a seekable stream to try it on.
+        in.clear();
+        auto in_position = in.tellg();
+        bool in_could_tell = in.good();
+        in.clear();
+       
+        // Try and load the best thing. If we find a weird VPKG tag, don't skip over it.
+        get<0>(first_result) = std::move(try_load_one<FirstPriority>(in, filename, true));
         
-        if (!it.has_current()) {
-            // If there's nothing to look at, we're done
-            return LOAD_FINISHED;
-        }
-        
-        // Grab and cache the tag
-        string tag_to_load = (*it).first;
-        
-        // Look for a loader in the registry based on the tag.
-        auto* loader = Registry::find_loader<One>(tag_to_load);
-        
-        if (loader == nullptr) {
-            // We can't load from this. Try again later.
-            return LOAD_SEARCHING;
-        }
-        
-        // Otherwise we can load, so do it.
-        slot = (*loader)([&](const message_consumer_function_t& handle_message) {
-            while (it.has_current() && (*it).first == tag_to_load) {
-                // Feed in messages from the file until we run out or the tag changes
-                auto& message = (*it).second;
-                if (message.get() != nullptr) {
-                    // Handle all the messages that actually exist.
-                    // Just scan through tag-only groups.
-                    handle_message(*message);
+        if (!get<0>(first_result)) {
+            // It wasn't there.
+            
+            if (!in_could_tell) {
+                throw std::runtime_error("Cound not track stream offset");
+            }
+            
+            // Seek to beginning again
+            in.clear();
+            auto in_new_position = in.tellg();
+            in.clear();
+            
+            if (in_new_position != in_position) {
+                in.seekg(in_position);
+                if (!in.good()) {
+                    throw std::runtime_error("Cound not seek back to start of stream for next option");
                 }
-                ++it;
+            }
+            
+            // Try the (nonempty) others
+            remaining_results = std::move(try_load_first<SecondPriority, Rest...>(in, filename));
+        }
+        
+        return tuple_cat(std::move(first_result), std::move(remaining_results));
+    }
+    
+    /**
+     * Allocate and load the first available type from the given stream.
+     * Returns a tuple where at most one item is filled, and that item is the
+     * first type we could successfully load out of the template parameters.
+     *
+     * If any type is to be loaded from type-tagged messages, it must come
+     * first, or its type-tagged messages may be skipped when looking for
+     * higher-priority types.
+     *
+     * filename is optional, and can be used by callback code that may, for
+     * some reason, want to link the stream back to a path (cough cough GFA
+     * loader cough cough)
+     */
+    template<typename Only>
+    static tuple<unique_ptr<Only>> try_load_first(istream& in, const string& filename = "") {
+        return make_tuple(try_load_one<Only>(in, filename));
+    }
+    
+   
+    /**
+     * Load an object of the given type from a stream.
+     * The stream has to be a bare non-VPKG stream understood by the loader.
+     * Returns the loaded object, or null if no loader liked the input.
+     *
+     * filename is optional, and can be used by callback code that may, for some reason,
+     * want to link the stream back to a path (cough cough GFA loader cough cough).
+     */
+    template<typename Wanted>
+    static unique_ptr<Wanted> try_load_bare(istream& in, const string& filename = "") {
+        
+        // We'll fill this in with the loaded object, if any.
+        unique_ptr<Wanted> result;
+        
+        // Make sure we have putback capability.
+        with_putback(in, [&](istream& from) {
+            if(!from) {
+                // We can't open the file; return an empty pointer.
+                return;
+            }
+            
+            // See if we can use a bare loader
+            auto* bare_loaders = Registry::find_bare_loaders<Wanted>();
+            
+            if (bare_loaders != nullptr) {
+                for (auto& loader_and_checker : *bare_loaders) {
+                    // Just linear scan through all the loaders.
+                    // Each checker must unget any characters it gets.
+                    if (loader_and_checker.second(from)) {
+                        // Use the first loader that accepts this file.
+                        // Up to the user to avoid prefix overlap.
+                        result = (Wanted*)(loader_and_checker.first)(from, filename);
+                        return;
+                    }
+                }
             }
         });
         
-        // Say we loaded something
-        return LOAD_SUCCESS;
+        return result;
     }
     
+    /**
+     * Load an object of the given type from a stream.
+     * The stream has to be a VPKG type-tagged message stream.
+     * Returns the loaded object, or null if the messages have incompatible
+     * type tags. If the messages have incompatible tags, some may be consumed
+     * from the stream.
+     * Throws an exception if the input is not a VPKG type-tagged message stream.
+     */
+    static unique_ptr<Wanted> try_load_encapsulated(istream& in) {
+
+        unique_ptr<Wanted> result;
+        
+        with_putback(in, [&](istream& from) {
+            
+            if(!from) {
+                // We can't open the file; return an empty pointer.
+                return;
+            }
+            
+            if (!BlockedGzipInputStream::SmellsLikeGzip(from)) {
+                // This isn't compressed tagged data. It might be uncompressed
+                // type-tagged data.
+        
+#ifdef debug
+                cerr << "Sniffing tag from stream" << endl;
+#endif
+                
+                // Sniff using get and unget.
+                sniffed_tag = MessageIterator::sniff_tag(from);
+                
+#ifdef debug
+                cerr << "Sniffed tag: " << sniffed_tag << endl;
+#endif
+                if (sniffed_tag.empty()) {
+                    // This isn't uncompressed tagged data either. So we can't load it.
+                    return;
+                }
+                
+                // See if we have a registered loader for this type.
+                auto* loader = Registry::find_loader<Wanted>(sniffed_tag);
+                
+                if (!loader) {
+                    // This has a tag we can't use and we know it, so stop now.
+                    return;
+                }
+            }
+            
+            // If we get here, either it is GZIP-compressed (so we need to
+            // really read some of it to start decompression), or it is
+            // uncompressed and type-tagged with a tag we know.
+            //
+            // We want to proceed with making a MessageIterator and using its error
+            // reporting to diagnose any problems with the file.
+            MessageIterator it(from);
+            
+            // Try and load from the iterator
+            result = std::move(try_load_encapsulated<Wanted>(it));
+        });
+        
+        return result;
+    }
+    
+    /**
+     * Load an object of the given type from an iterator of type-tagged messages.
+     * Returns the loaded object, or null if the messages have incompatible
+     * type tags. If the messages have incompatible tags, the iterator will not be advanced.
+     */
+    static unique_ptr<Wanted> try_load_encapsulated(MessageIterator& it) {
+
+#ifdef debug
+        cerr << "Iterator has a first item? " << it.has_current() << endl;
+#endif
+            
+        if (it.has_current()) {
+            // File is not empty
+        
+            string current_tag = (*it).first;
+                
+#ifdef debug
+            cerr << "Iterator found tag \"" << current_tag << "\"" << endl;
+#endif
+            
+            // See if we have one that has a registered loader for this type.
+            auto* loader = Registry::find_loader<Wanted>(current_tag);
+            
+#ifdef debug
+            cerr << "Loader for " << describe<Wanted>() << " from that tag: " << loader << endl;
+#endif
+            
+            if (loader == nullptr) {
+                // This isn't the right thing; Bail out and let someone else try again.
+                return unique_ptr<Wanted>(nullptr);
+            } else {
+                // Load with it and return a unique_ptr for the result.
+                return unique_ptr<Wanted>((Wanted*)(*loader)([&](const message_consumer_function_t& handle_message) {
+                    while (it.has_current() && (*it).first == current_tag) {
+                        // Feed in messages from the file until we run out or the tag changes
+                        if ((*it).second.get() != nullptr) {
+                            handle_message(*((*it).second));
+                        }
+                        ++it;
+                    }
+                }));
+            }
+        } else {
+            // If the file is empty, return null.
+            return unique_ptr<Wanted>(nullptr);
+        }
+    }
+
+    /**
+     * Run the given callback with a version of the given stream that allows putback.
+     */
+    inline void with_putback(istreeam& in, const function<void(istream&)>& callback) {
+        istream* from_ptr = &in;
+        unique_ptr<streamistream> wrapper;
+        if (&in == &cin) {
+            // If reading from standard input, we buffer so magic number
+            // sniffing can do putback.
+            wrapper = make_unique<streamistream>(in);
+            from_ptr = wrapper.get();
+        }
+        auto& from = *from_ptr;
+        
+        callback(from);
+    }
+
     /**
      * Return a string to represent the given type. Should be demangled and human-readable.
      */
