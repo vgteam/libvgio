@@ -162,7 +162,7 @@ public:
 
     /**
      * Generealization of register_bare_loader_saver_with_magic, where user can supply their
-     * own header-checking function.  
+     * own header-checking function. Check function must peek/get/unget and may not seek/tell. 
      */
     template<typename Handled, typename... Bases>
     static void register_bare_loader_saver_with_header_check(const string& tag,

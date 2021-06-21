@@ -54,36 +54,31 @@ public:
         // We will fill this in if we manage to load the thing
         tuple<unique_ptr<Wanted>...> results;
         
+        // We can't reduce over the eldritch abomination that is a tuple of a
+        // variable number of variable-typed things without making a pact with
+        // the template gods, so we just set this flag as soon as we find one
+        // of the options so we can stop looking for the others.
+        bool found = false;
+        
         // Use one unified unget setup to not consume any stream in the subcalls.
         with_putback(in, [&](istream& from) {
             // First try a bare loader
-            results = std::move(try_load_first_bare<Wanted...>(from, filename));
+            results = std::move(try_load_first_bare<Wanted...>(from, filename, found));
             
-            if (!any_filled<Wanted...>(result)) {
+            // The bare loaders will always unget back to the start.
+            
+            if (!found) {
                 // If that doesn't work, try loading as encapsulated type-tagged data
-                result = std::move(try_load_first_encapsulated<Wanted...>(from));
+                
+                // Make an iterator to read it
+                MessageIterator it(from);
+                
+                // And read it
+                results = std::move(try_load_first_encapsulated<Wanted...>(it, found));
             }
         });
-    }
-    
-    /**
-     * Return true if any of the elements at the given indices in the given tuple are filled.
-     */
-    template<typename Wanted..., size_t... Indices>
-    bool any_filled_impl(const tuple<unique_ptr<Wanted>...>& t, std::index_sequence<Indices...>) {
-        auto mapreduce = [](auto... elements) -> bool {
-            return max({((bool)elements)...});
-        };
         
-        return mapreduce(get<Indices>(t)...);
-    }
-    
-    /**
-     * Return true if any of the elements at the indices under the given value in the given tuple are filled.
-     */
-    template<typename Wanted..., size_t IndexCount = std::tuple_size<tuple<unique_ptr<Wanted>...>::value>, typename Indices = std::make_index_sequence<IndexCount>>
-    bool any_filled(const tuple<unique_ptr<Wanted>...>& t) {
-        return any_filled_impl(t, Indices{});
+        return std::move(results);
     }
     
     /**
@@ -318,14 +313,14 @@ private:
      * Allocate and load the first available type from the given stream, using
      * a bare loader. Returns a tuple where at most one item is filled, and
      * that item is the first type we could successfully load out of the
-     * template parameters.
+     * template parameters. Sets found to true if anything is successfully loaded.
      *
      * filename is optional, and can be used by callback code that may, for
      * some reason, want to link the stream back to a path (cough cough GFA
      * loader cough cough)
      */
     template<typename FirstPriority, typename SecondPriority, typename... Rest>
-    static tuple<unique_ptr<FirstPriority>, unique_ptr<SecondPriority>, unique_ptr<Rest>...> try_load_first_bare(istream& in, const string& filename = "") {
+    static tuple<unique_ptr<FirstPriority>, unique_ptr<SecondPriority>, unique_ptr<Rest>...> try_load_first_bare(istream& in, const string& filename, bool& found) {
     
         // We will load to here if we can
         tuple<unique_ptr<FirstPriority>> first_result;
@@ -338,13 +333,16 @@ private:
             // Try and load the best thing. If we find a weird VPKG tag, don't skip over it.
             get<0>(first_result) = std::move(try_load_bare<FirstPriority>(in, filename));
             
-            if (!get<0>(first_result)) {
+            if (get<0>(first_result)) {
+                // We found it
+                found = true;
+            } else {
                 // It wasn't there.
                 
                 // Try the (nonempty) others
-                remaining_results = std::move(try_load_first_bare<SecondPriority, Rest...>(in, filename));
+                remaining_results = std::move(try_load_first_bare<SecondPriority, Rest...>(in, filename, found));
             }
-        }
+        });
         
         return tuple_cat(std::move(first_result), std::move(remaining_results));
     }
@@ -353,43 +351,49 @@ private:
      * Allocate and load the first available type from the given stream, using
      * a bare loader. Returns a tuple where at most one item is filled, and
      * that item is the first type we could successfully load out of the
-     * template parameters.
+     * template parameters. Sets found to true if anything is successfully loaded.
      *
      * filename is optional, and can be used by callback code that may, for
      * some reason, want to link the stream back to a path (cough cough GFA
      * loader cough cough)
      */
     template<typename Only>
-    static tuple<unique_ptr<Only>> try_load_first_bare(istream& in, const string& filename = "") {
-        return make_tuple(try_load_bare<Only>(in, filename));
+    static tuple<unique_ptr<Only>> try_load_first_bare(istream& in, const string& filename, bool& found) {
+        // Go try and get this thing
+        auto loaded = try_load_bare<Only>(in, filename);
+        if (loaded) {
+            // We got this thing
+            found = true;
+        }
+        
+        return make_tuple(std::move(loaded));
     }
     
     /**
      * Allocate and load the first available type from the given iterator, using
      * a bare loader. Returns a tuple where at most one item is filled, and
      * that item is the first type we could successfully load out of the
-     * template parameters.
+     * template parameters. Sets found to true if anything is successfully loaded.
      */
     template<typename FirstPriority, typename SecondPriority, typename... Rest>
-    static tuple<unique_ptr<FirstPriority>, unique_ptr<SecondPriority>, unique_ptr<Rest>...> try_load_first_encapsulated(MessageIterator& it) {
+    static tuple<unique_ptr<FirstPriority>, unique_ptr<SecondPriority>, unique_ptr<Rest>...> try_load_first_encapsulated(MessageIterator& it, bool& found) {
     
         // We will load to here if we can
         tuple<unique_ptr<FirstPriority>> first_result;
         // And to here if we can't
         tuple<unique_ptr<SecondPriority>, unique_ptr<Rest>...> remaining_results;
         
-        // Use one unified unget setup to not consume any stream in the subcalls.
-        with_putback(in, [&](istream& from) {
-           
-            // Try and load the best thing. If we find a weird VPKG tag, don't skip over it.
-            get<0>(first_result) = std::move(try_load_encapsulated<FirstPriority>(it));
+        // Try and load the best thing. If we find a weird VPKG tag, don't skip over it.
+        get<0>(first_result) = std::move(try_load_encapsulated<FirstPriority>(it));
+        
+        if (get<0>(first_result)) {
+            // We found it
+            found = true;
+        } else {
+            // It wasn't there.
             
-            if (!get<0>(first_result)) {
-                // It wasn't there.
-                
-                // Try the (nonempty) others
-                remaining_results = std::move(try_load_first_encapsulated<SecondPriority, Rest...>(it));
-            }
+            // Try the (nonempty) others
+            remaining_results = std::move(try_load_first_encapsulated<SecondPriority, Rest...>(it, found));
         }
         
         return tuple_cat(std::move(first_result), std::move(remaining_results));
@@ -399,88 +403,20 @@ private:
      * Allocate and load the first available type from the given iterator, using
      * a VPKG-encapsulated loader. Returns a tuple where at most one item is
      * filled, and that item is the first type we could successfully load out
-     * of the template parameters.
+     * of the template parameters. Sets found to true if anything is successfully loaded.
      */
     template<typename Only>
-    static tuple<unique_ptr<Only>> try_load_first_encapsulated(MessageIterator& it) {
-        return make_tuple(try_load_encapsulated<Only>(it));
-    }
-
-    /**
-     * Allocate and load the first available type from the given stream.
-     * Returns a tuple where at most one item is filled, and that item is the
-     * first type we could successfully load out of the template parameters.
-     *
-     * If any type is to be loaded from type-tagged messages, it must come
-     * first, or its type-tagged messages may be skipped when looking for
-     * higher-priority types.
-     *
-     * filename is optional, and can be used by callback code that may, for
-     * some reason, want to link the stream back to a path (cough cough GFA
-     * loader cough cough)
-     */
-    template<typename FirstPriority, typename SecondPriority, typename... Rest>
-    static tuple<unique_ptr<FirstPriority>, unique_ptr<SecondPriority>, unique_ptr<Rest>...> try_load_first(istream& in, const string& filename = "") {
-        
-        // We will load to here if we can
-        tuple<unique_ptr<FirstPriority>> first_result;
-        // And to here if we can't
-        tuple<unique_ptr<SecondPriority>, unique_ptr<Rest>...> remaining_results;
-       
-        // See if we have a seekable stream to try it on.
-        in.clear();
-        auto in_position = in.tellg();
-        bool in_could_tell = in.good();
-        in.clear();
-       
-        // Try and load the best thing. If we find a weird VPKG tag, don't skip over it.
-        get<0>(first_result) = std::move(try_load_one<FirstPriority>(in, filename, true));
-        
-        if (!get<0>(first_result)) {
-            // It wasn't there.
-            
-            if (!in_could_tell) {
-                throw std::runtime_error("Cound not track stream offset");
-            }
-            
-            // Seek to beginning again
-            in.clear();
-            auto in_new_position = in.tellg();
-            in.clear();
-            
-            if (in_new_position != in_position) {
-                in.seekg(in_position);
-                if (!in.good()) {
-                    throw std::runtime_error("Cound not seek back to start of stream for next option");
-                }
-            }
-            
-            // Try the (nonempty) others
-            remaining_results = std::move(try_load_first<SecondPriority, Rest...>(in, filename));
+    static tuple<unique_ptr<Only>> try_load_first_encapsulated(MessageIterator& it, bool& found) {
+        // Go try and get this thing
+        auto loaded = try_load_encapsulated<Only>(it);
+        if (loaded) {
+            // We got this thing
+            found = true;
         }
         
-        return tuple_cat(std::move(first_result), std::move(remaining_results));
+        return make_tuple(std::move(loaded));
     }
-    
-    /**
-     * Allocate and load the first available type from the given stream.
-     * Returns a tuple where at most one item is filled, and that item is the
-     * first type we could successfully load out of the template parameters.
-     *
-     * If any type is to be loaded from type-tagged messages, it must come
-     * first, or its type-tagged messages may be skipped when looking for
-     * higher-priority types.
-     *
-     * filename is optional, and can be used by callback code that may, for
-     * some reason, want to link the stream back to a path (cough cough GFA
-     * loader cough cough)
-     */
-    template<typename Only>
-    static tuple<unique_ptr<Only>> try_load_first(istream& in, const string& filename = "") {
-        return make_tuple(try_load_one<Only>(in, filename));
-    }
-    
-   
+
     /**
      * Load an object of the given type from a stream.
      * The stream has to be a bare non-VPKG stream understood by the loader.
@@ -512,7 +448,7 @@ private:
                     if (loader_and_checker.second(from)) {
                         // Use the first loader that accepts this file.
                         // Up to the user to avoid prefix overlap.
-                        result = (Wanted*)(loader_and_checker.first)(from, filename);
+                        result.reset((Wanted*)(loader_and_checker.first)(from, filename));
                         return;
                     }
                 }
@@ -530,6 +466,7 @@ private:
      * from the stream.
      * Throws an exception if the input is not a VPKG type-tagged message stream.
      */
+    template<typename Wanted>
     static unique_ptr<Wanted> try_load_encapsulated(istream& in) {
 
         unique_ptr<Wanted> result;
@@ -550,7 +487,7 @@ private:
 #endif
                 
                 // Sniff using get and unget.
-                sniffed_tag = MessageIterator::sniff_tag(from);
+                string sniffed_tag = MessageIterator::sniff_tag(from);
                 
 #ifdef debug
                 cerr << "Sniffed tag: " << sniffed_tag << endl;
@@ -589,6 +526,7 @@ private:
      * Returns the loaded object, or null if the messages have incompatible
      * type tags. If the messages have incompatible tags, the iterator will not be advanced.
      */
+    template<typename Wanted>
     static unique_ptr<Wanted> try_load_encapsulated(MessageIterator& it) {
 
 #ifdef debug
@@ -635,7 +573,7 @@ private:
     /**
      * Run the given callback with a version of the given stream that allows putback.
      */
-    inline void with_putback(istreeam& in, const function<void(istream&)>& callback) {
+    static inline void with_putback(istream& in, const function<void(istream&)>& callback) {
         istream* from_ptr = &in;
         unique_ptr<streamistream> wrapper;
         if (&in == &cin) {
@@ -679,28 +617,6 @@ private:
         }
         
         return demangled;
-    }
-    
-    /**
-     * Return a new default-constructed instance of the given type, or a null
-     * pointer if it is not default constructible.
-     *
-     * This version matches default-consttructable types.
-     */
-    template <typename T>
-    static typename std::enable_if<std::is_default_constructible<T>::value, unique_ptr<T>>::type make_default_or_null() {
-        return make_unique<T>();
-    }
-    
-    /**
-     * Return a new default-constructed instance of the given type, or a null
-     * pointer if it is not default constructible.
-     *
-     * This version matches non-default-consttructable types.
-     */
-    template <typename T>
-    static typename std::enable_if<!std::is_default_constructible<T>::value, unique_ptr<T>>::type make_default_or_null() {
-        return unique_ptr<T>(nullptr);
     }
 };
 
