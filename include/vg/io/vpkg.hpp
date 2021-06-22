@@ -450,8 +450,10 @@ private:
                 for (auto& loader_and_checker : *bare_loaders) {
                     // Just linear scan through all the loaders.
                     // Each checker must unget any characters it gets.
-                    // Note that the checker may be null, in which case we always match the loader.
-                    if (loader_and_checker.second == nullptr || loader_and_checker.second(from)) {
+                    // Note that the checker may be null, in which case we skip
+                    // the function because we wouldn't be able to tell the
+                    // file from a type-tagged message file.
+                    if (loader_and_checker.second != nullptr && loader_and_checker.second(from)) {
                         // Use the first loader that accepts this file.
                         // Up to the user to avoid prefix overlap.
                         result.reset((Wanted*)(loader_and_checker.first)(from, filename));
