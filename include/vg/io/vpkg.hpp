@@ -103,6 +103,11 @@ public:
             // Open the file
             ifstream open_file(filename.c_str());
             
+            if (!open_file) {
+                cerr << "error[VPKG::load_one]: Could not open " << filename << " to determine file type" << endl;
+                exit(1);
+            }
+            
             // Read from it
             return try_load_first<Wanted...>(open_file, filename);
         }
@@ -445,7 +450,8 @@ private:
                 for (auto& loader_and_checker : *bare_loaders) {
                     // Just linear scan through all the loaders.
                     // Each checker must unget any characters it gets.
-                    if (loader_and_checker.second(from)) {
+                    // Note that the checker may be null, in which case we always match the loader.
+                    if (loader_and_checker.second == nullptr || loader_and_checker.second(from)) {
                         // Use the first loader that accepts this file.
                         // Up to the user to avoid prefix overlap.
                         result.reset((Wanted*)(loader_and_checker.first)(from, filename));
