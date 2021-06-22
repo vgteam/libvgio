@@ -437,17 +437,25 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length, function<string(ni
         Position cur_position = aln.path().mapping(cur_mapping).position();
         size_t cur_len = node_to_length(cur_position.node_id());
         string& sequence = *aln.mutable_sequence();
+        bool from_cg = false;
         // Use the CS cigar string to add Edits into our Path, as well as set the sequence
-        gafkluge::for_each_cs(gaf, [&] (const string& cs_cigar) {
-                assert(cur_offset < cur_len || (cs_cigar[0] == '+' && cur_offset <= cur_len));
+        gafkluge::for_each_cigar(gaf, [&] (const char& cigar_cat, const size_t& cigar_len, const string& cigar_query, const string& cigar_target) {
+                assert(cur_offset < cur_len || ((cigar_cat == '+' || cigar_cat == 'I' || cigar_cat == 'S') && cur_offset <= cur_len));
+                if (!from_cg && cigar_cat != ':' && cigar_cat != '+' && cigar_cat != '-' && cigar_cat != '*') {
+                    from_cg = true;
+                }
 
-                if (cs_cigar[0] == ':') {
-                    int64_t match_len = stol(cs_cigar.substr(1));
+                if (cigar_cat == ':' || cigar_cat == 'M' || cigar_cat == '=' || cigar_cat == 'X') {
+                    int64_t match_len = (int64_t)cigar_len;
                     while (match_len > 0) {
                         int64_t current_match = std::min(match_len, (int64_t)node_to_length(cur_position.node_id()) - cur_offset);
                         Edit* edit = aln.mutable_path()->mutable_mapping(cur_mapping)->add_edit();
                         edit->set_from_length(current_match);
                         edit->set_to_length(current_match);
+                        if (cigar_cat == 'X') {
+                            // add a phony snp
+                            edit->set_sequence(string(current_match, 'N'));
+                        }
                         if (node_to_sequence) {
                             sequence += node_to_sequence(cur_position.node_id(), cur_position.is_reverse()).substr(cur_offset, current_match);
                         }
@@ -461,7 +469,7 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length, function<string(ni
                             cur_len = node_to_length(cur_position.node_id());
                         }
                     }
-                } else if (cs_cigar[0] == '+') {
+                } else if (cigar_cat == '+' || cigar_cat == 'I' || cigar_cat == 'S') {
                     size_t tgt_mapping = cur_mapping;
                     // left-align insertions to try to be more consistent with vg
                     if (cur_offset == 0 && cur_mapping > 0 && (!aln.path().mapping(cur_mapping - 1).position().is_reverse()
@@ -470,31 +478,45 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length, function<string(ni
                     }
                     Edit* edit = aln.mutable_path()->mutable_mapping(tgt_mapping)->add_edit();
                     edit->set_from_length(0);
-                    edit->set_to_length(cs_cigar.length() - 1);
-                    edit->set_sequence(cs_cigar.substr(1));
+                    edit->set_to_length(cigar_len);
+                    if (cigar_cat == '+') {
+                        edit->set_sequence(cigar_query);
+                    } else {
+                        // todo: better to leave this empty?  I think client code may be expecting sequence so we give it
+                        edit->set_sequence(string(cigar_len, 'N'));
+                    }
                     sequence += edit->sequence();
-                } else if (cs_cigar[0] == '-') {
-                    string del = cs_cigar.substr(1);
-                    assert(del.length() <= node_to_length(cur_position.node_id()) - cur_offset);
-                    assert(!node_to_sequence || del == node_to_sequence(cur_position.node_id(), cur_position.is_reverse()).substr(cur_offset, del.length()));
-                    Edit* edit = aln.mutable_path()->mutable_mapping(cur_mapping)->add_edit();
-                    edit->set_to_length(0);
-                    edit->set_from_length(del.length());
-                    cur_offset += del.length();
-                    // unlike matches, we don't allow deletions to span multiple nodes
-                    assert(cur_offset <= node_to_length(cur_position.node_id()));
-                } else if (cs_cigar[0] == '*') {
-                    assert(cs_cigar.length() == 3);
-                    char from = cs_cigar[1];
-                    char to = cs_cigar[2];
-                    assert(!node_to_sequence || node_to_sequence(cur_position.node_id(), cur_position.is_reverse())[cur_offset] == from);
+                } else if (cigar_cat == '-' || cigar_cat == 'D') {
+                    int64_t del_len = (int64_t)cigar_len;
+                    while (del_len > 0) {
+                        int64_t current_del = std::min(del_len, (int64_t)node_to_length(cur_position.node_id()) - cur_offset);
+                        Edit* edit = aln.mutable_path()->mutable_mapping(cur_mapping)->add_edit();
+                        edit->set_to_length(0);
+                        edit->set_from_length(current_del);
+                        del_len -= current_del;
+                        cur_offset += current_del;
+                        // like matches, we allow deletions to span multiple nodes now.
+                        if (del_len > 0) {
+                            assert(cur_mapping < aln.path().mapping_size() - 1);
+                            ++cur_mapping;
+                            cur_offset = 0;
+                            cur_position = aln.path().mapping(cur_mapping).position();
+                            cur_len = node_to_length(cur_position.node_id());
+                        }
+                    }
+                } else if (cigar_cat == '*') {
+                    assert(cigar_len == 1);
+                    assert(!node_to_sequence || node_to_sequence(cur_position.node_id(), cur_position.is_reverse()).substr(cur_offset,1) == cigar_target);
                     Edit* edit = aln.mutable_path()->mutable_mapping(cur_mapping)->add_edit();
                     // todo: support multibase snps
-                    edit->set_from_length(1);
-                    edit->set_to_length(1);
-                    edit->set_sequence(string(1, to));
+                    edit->set_from_length(cigar_len);
+                    edit->set_to_length(cigar_len);
+                    edit->set_sequence(cigar_query);
                     sequence += edit->sequence();
                     ++cur_offset;
+                } else {
+                    //todo: better error (warning?)
+                    assert(false);
                 }
             
                 // advance to the next mapping if we've pushed the offset past the current node
@@ -508,6 +530,13 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length, function<string(ni
                     }
                 }
             });
+        if (from_cg) {
+            // remember that we came from a lossy cg-cigar -> GAM conversion path
+            auto* annotation = aln.mutable_annotation();
+            google::protobuf::Value is_from_cg;
+            is_from_cg.set_bool_value(from_cg);
+            (*annotation->mutable_fields())["from_cg"] = is_from_cg;
+        }
     }
 
     for (auto opt_it : gaf.opt_fields) {
