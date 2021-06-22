@@ -135,9 +135,14 @@ public:
      * Register a loading function and a saving function with the given tag for
      * the given object type and list of base classes. The functions operate on
      * bare streams; conversion to type-tagged messages of chunks of stream
-     * data is performed automatically. The load function will also be
-     * registered to load from non-type-tagged-message-format files, when
-     * trying to load the actual handled type, for backward compatibility.
+     * data is performed automatically.
+     *
+     * Because, without a magic value or header check function, we can't reject
+     * type-tagged message files, loaders registered with this function won't
+     * actually be used when a non-type-tagged file is loaded. See
+     * register_bare_loader_saver_with_magic(), or use
+     * register_bare_loader_saver_with_header_check() with an always true check
+     * function if you do not need to load type-tagged messages.
      */
     template<typename Handled, typename... Bases>
     static void register_bare_loader_saver(const string& tag, bare_load_function_t loader, bare_save_function_t saver);
@@ -145,16 +150,17 @@ public:
     /**
      * Like register_bare_loader_saver(), except that additionally the function
      * will be used when attempting to load any of the base classes when the
-     * file begins with the specified magic bytes.
+     * file begins with the specified magic bytes. Type-tagged files with the
+     * given tag that do not match the magic will be decoded into a stream and
+     * loaded with the loader.
      */
     template<typename Handled, typename... Bases>
     static void register_bare_loader_saver_with_magic(const string& tag, const string& magic,
         bare_load_function_t loader, bare_save_function_t saver);
         
     /**
-     * Like register_bare_loader_saver(), except that additionally the function
-     * will be used when attempting to load any of the base classes when the
-     * file begins with any of the the specified magic byte sequences.
+     * Like register_bare_loader_saver_with_magic(), except that multiple magic
+     * values are supported.
      */
     template<typename Handled, typename... Bases>
     static void register_bare_loader_saver_with_magics(const string& tag, const vector<string>& magics,
@@ -292,8 +298,9 @@ private:
     
     /**
      * Register a load function for loading the given types from
-     * non-type-tagged-message "bare" streams witht he given possibly empty
-     * prefix, which is retained in the stream data. 
+     * demultiplexed streams. If a header sniffing function is provided, the
+     * function will also be used on the whole input stream if it matches the
+     * function, skipping demultiplexing of type-tagged messages.
      */
     template<typename Handled, typename... Bases>
     static void register_bare_loader(bare_load_function_t loader,
@@ -436,7 +443,7 @@ void Registry::register_bare_loader_saver(const string& tag, bare_load_function_
     // Register the type-tagged wrapped functions
     register_loader_saver<Handled, Bases...>(tag, wrap_bare_loader(loader), wrap_bare_saver(saver));
     
-    // Register the bare stream loader
+    // Register the bare stream loader. Don't match any files; only handle type-tagged messages.
     register_bare_loader<Handled>(loader, nullptr);
 
 }
