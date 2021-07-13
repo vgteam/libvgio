@@ -135,7 +135,7 @@ inline void parse_gaf_record(const std::string& gaf_line, GafRecord& gaf_record)
                 step.is_interval = false;
             } else {
                 // colon, we interpret the step as a stable path interval
-                step.name = step_token.substr(1, colon);
+                step.name = step_token.substr(1, colon - 1);
                 step.is_stable = true;
                 step.is_interval = true;
                 size_t dash = step_token.find_first_of('-', colon);
@@ -227,7 +227,7 @@ inline std::ostream& operator<<(std::ostream& os, const gafkluge::GafStep& gaf_s
     }
     os << gaf_step.name;
     if (gaf_step.is_interval) {
-        os << gaf_step.start << "-" << gaf_step.end;
+        os << ":" <<  gaf_step.start << "-" << gaf_step.end;
     }
     return os;
 }
