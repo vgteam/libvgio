@@ -70,7 +70,20 @@ message("Protobuf will be ${Protobuf_LIBRARIES} for PIC dynamic code and ${Proto
 
 # Find threads
 set(THREADS_PREFER_PTHREAD_FLAG ON)
-find_package(Threads REQUIRED)
+find_package(Threads)
+
+if (Threads_FOUND)
+    message("Using real Threads library")
+else()
+    message("Faking Threads library; does your CMake know about pthreads?")
+    set(CMAKE_THREAD_LIBS_INIT "-lpthread")
+    set(CMAKE_HAVE_THREADS_LIBRARY 1)
+    set(CMAKE_USE_WIN32_THREADS_INIT 0)
+    set(CMAKE_USE_PTHREADS_INIT 1)
+    set(THREADS_PREFER_PTHREAD_FLAG ON)
+    add_library(Threads::Threads INTERFACE IMPORTED)
+    set_property(TARGET Threads::Threads PROPERTY INTERFACE_LINK_LIBRARIES "${CMAKE_THREAD_LIBS_INIT}")
+endif()
 
 # Find HTSlib. We find it with pkg-config, so it has static and dynamic libs by default.
 pkg_check_modules(HTSlib REQUIRED htslib)

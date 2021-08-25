@@ -217,6 +217,56 @@ inline void for_each_cs(const GafRecord& gaf_record, std::function<void(const st
         }
     }
 }
+
+/*
+ * Visit each vg cigar record as a string.  cg cigars are described here: 
+ * https://samtools.github.io/hts-specs/SAMv1.pdf 
+ * |([0-9]+[MIDNSHPX=])+
+ */
+inline void for_each_cg(const GafRecord& gaf_record, std::function<void(const char&, const size_t&)> fn) {
+    if (gaf_record.opt_fields.count("cg")) {
+        const std::string& cg_cigar = gaf_record.opt_fields.find("cg")->second.second;
+        size_t next;
+        for (size_t co = 0; co != std::string::npos && co < cg_cigar.length(); co = next) {
+            next = cg_cigar.find_first_of("MIDNSHPX=", co);
+            assert(next != std::string::npos); // todo: better error
+            std::string cg_len = cg_cigar.substr(co, next - co);
+            size_t cg_len_i = std::stol(cg_len);
+            fn(cg_cigar[next], cg_len_i);
+            ++next;
+        }
+    }
+}
+
+/*
+ * Generic cigar function that will visit cs cigars if present, but fall back on cg cigars otherwise
+ * Function takes in token {:*-+MIDNSHPX=}, length, query-string, target-string
+ * The latter two strings are only filled by cs records and will be left empty for cg
+ */
+inline void for_each_cigar(const GafRecord& gaf_record, std::function<void(const char&, const size_t&, const std::string&, const std::string&)> fn) {
+    if (gaf_record.opt_fields.count("cs")) {
+        for_each_cs(gaf_record, [&](const std::string& cs_str) {
+                if (cs_str[0] == ':') {
+                    fn(cs_str[0], std::stol(cs_str.substr(1)), "", "");
+                } else if (cs_str[0] == '+') {
+                    std::string qs = cs_str.substr(1);
+                    fn(cs_str[0], qs.length(), qs, "");
+                } else if (cs_str[0] == '-') {
+                    std::string ts = cs_str.substr(1);
+                    fn(cs_str[0], ts.length(), "", ts);
+                } else if (cs_str[0] == '*') {
+                    assert(cs_str.length() == 3);
+                    fn(cs_str[0], 1, cs_str.substr(2,1), cs_str.substr(1,1));
+                } else {
+                    assert(false);
+                }
+            });
+    } else {
+        for_each_cg(gaf_record, [&](const char& cg_tok, const size_t& cg_len) {
+                fn(cg_tok, cg_len, "", "");
+            });
+    }
+}
     
 /*
  * Write a GAF Step to a stream
