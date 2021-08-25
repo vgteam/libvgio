@@ -125,7 +125,7 @@ inline void parse_gaf_record(const std::string& gaf_line, GafRecord& gaf_record)
             GafStep step;
             pos = buffer.find_first_of("><", pos);
             next = buffer.find_first_of("><", pos + 1);
-            std::string step_token = buffer.substr(pos, next);
+            std::string step_token = buffer.substr(pos, next != std::string::npos ? next - pos + 1 : std::string::npos);
             size_t colon = step_token.find_first_of(':');
             step.is_reverse = step_token[0] == '<';
             if (colon == std::string::npos) {
@@ -142,7 +142,7 @@ inline void parse_gaf_record(const std::string& gaf_line, GafRecord& gaf_record)
                 if (dash == std::string::npos) {
                     throw std::runtime_error("Error parsing GAF range of " + step_token);
                 }
-                step.start = std::stol(step_token.substr(colon + 1, dash));
+                step.start = std::stol(step_token.substr(colon + 1, dash - colon));
                 step.end = std::stol(step_token.substr(dash + 1));
             }
             gaf_record.path.push_back(step);
