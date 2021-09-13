@@ -96,7 +96,7 @@ include(${CMAKE_ROOT}/Modules/ExternalProject.cmake)
 
 # libhandlegraph (full build using its cmake config)
 ExternalProject_Add(handlegraph
-  SOURCE_DIR "${CMAKE_SOURCE_DIR}/deps/libhandlegraph"
+  SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/libhandlegraph"
   CMAKE_ARGS "${CMAKE_ARGS};-DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>")
 ExternalProject_Get_property(handlegraph INSTALL_DIR)
 set(handlegraph_INCLUDE "${INSTALL_DIR}/include")
