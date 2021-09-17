@@ -3,45 +3,7 @@ project(libvgio VERSION 0.0.0 LANGUAGES CXX)
 
 # Optimize by default, but also include debug info
 set(CMAKE_CXX_FLAGS "-O3 -g ${CMAKE_CXX_FLAGS}")
-if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
-
-  # assumes clang build
-  # we can't reliably detect when we're using clang, so for the time being we assume
-  # TODO: can't we though?
-
-  # adapted from https://stackoverflow.com/questions/46414660/macos-cmake-and-openmp
-  # find_package(OpenMP) does not work reliably on macOS, so we do its work ourselves
-  set (OpenMP_C "${CMAKE_C_COMPILER}")
-  set (OpenMP_C_FLAGS " -Xpreprocessor -fopenmp -I/opt/local/include/libomp -I/usr/local/include -L/opt/local/lib/libomp -L/usr/local/lib")
-  set (OpenMP_C_LIB_NAMES "libomp" "libgomp" "libiomp5")
-  set (OpenMP_CXX "${CMAKE_CXX_COMPILER}")
-  set (OpenMP_CXX_FLAGS " -Xpreprocessor -fopenmp -I/opt/local/include/libomp -I/usr/local/include -L/opt/local/lib/libomp -L/usr/local/lib")
-  set (OpenMP_CXX_LIB_NAMES "libomp" "libgomp" "libiomp5")
-  set (OpenMP_libomp_LIBRARY "omp")
-  set (OpenMP_libgomp_LIBRARY "gomp")
-  set (OpenMP_libiomp5_LIBRARY "iomp5")
-
-  # and now add the OpenMP parameters to the compile flags
-  set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
-  set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
-  set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS} -lomp")
-
-  # Mac needs libdl and libomp when linking the library
-  set(PLATFORM_EXTRA_LIB_FLAGS -ldl -lomp)
-
-elseif (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
-
-  find_package(OpenMP REQUIRED)
-
-  # add the flags it detects to the compile flags
-  set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS} -fopenmp")
-  set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS} -fopenmp")
-  set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
-
-  # Linux only needs libdl when linking the library
-  set(PLATFORM_EXTRA_LIB_FLAGS -ldl)
-
-endif()
+find_package(OpenMP REQUIRED)
 
 # Use C++14, so that Protobuf headers that use lambdas will work.
 set(CMAKE_CXX_STANDARD 14)
@@ -102,17 +64,10 @@ ExternalProject_Get_property(handlegraph INSTALL_DIR)
 set(handlegraph_INCLUDE "${INSTALL_DIR}/include")
 set(handlegraph_LIB "${INSTALL_DIR}/lib")
 
-# Set link directories. We can't use target_link_directories to keep these
-# straight between static and dynamic libraries since it's not available until
-# cmake 3.13, which isn't out in distros yet.
-link_directories(
-    ${HTSlib_LIBRARY_DIRS} ${Jansson_LIBRARY_DIRS}
-    ${HTSlib_STATIC_LIBRARY_DIRS} ${Jansson_STATIC_LIBRARY_DIRS}
-)
-
 # Set where the LC_ID_DYLIB install name for Mac dylib files ought to point.
 # It ought to point to where the dylibs will actually be installed
 # Only takes effect after installation
+include(GNUInstallDirs)
 set(CMAKE_INSTALL_NAME_DIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
 
 # Make Protobuf headers and code
@@ -178,16 +133,23 @@ target_compile_features(vgio_static PUBLIC cxx_std_14)
 # Also note that target_link_directories needs cmake 3.13+
 target_link_libraries(vgio
     PUBLIC
-        ${Protobuf_LIBRARIES} Threads::Threads ${HTSlib_LIBRARIES} ${Jansson_LIBRARIES} ${handlegraph_LIB}/libhandlegraph${CMAKE_SHARED_LIBRARY_SUFFIX} ${PLATFORM_EXTRA_LIB_FLAGS}
+        ${Protobuf_LIBRARIES} Threads::Threads ${HTSlib_LIBRARIES} ${Jansson_LIBRARIES} ${handlegraph_LIB}/libhandlegraph${CMAKE_SHARED_LIBRARY_SUFFIX} ${PLATFORM_EXTRA_LIB_FLAGS} OpenMP::OpenMP_CXX
 )
 target_link_libraries(vgio_static
     PUBLIC
-        ${Protobuf_STATIC_LIBRARIES} Threads::Threads ${HTSlib_STATIC_LIBRARIES} ${Jansson_LIBRARIES} ${handlegraph_LIB}/libhandlegraph${CMAKE_STATIC_LIBRARY_SUFFIX} ${PLATFORM_EXTRA_LIB_FLAGS}
+        ${Protobuf_STATIC_LIBRARIES} Threads::Threads ${HTSlib_STATIC_LIBRARIES} ${Jansson_LIBRARIES} ${handlegraph_LIB}/libhandlegraph${CMAKE_STATIC_LIBRARY_SUFFIX} ${PLATFORM_EXTRA_LIB_FLAGS} OpenMP::OpenMP_CXX
+)
+target_link_directories(vgio
+    PUBLIC
+        ${HTSlib_LIBRARY_DIRS} ${Jansson_LIBRARY_DIRS}
+)
+target_link_directories(vgio_static
+    PUBLIC
+        ${HTSlib_STATIC_LIBRARY_DIRS} ${Jansson_STATIC_LIBRARY_DIRS}
 )
 
 # Installation instructions
 
-include(GNUInstallDirs)
 set(INSTALL_CONFIGDIR ${CMAKE_INSTALL_LIBDIR}/cmake/VGio)
 
 install(TARGETS vgio vgio_static
