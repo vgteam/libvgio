@@ -338,7 +338,7 @@ void json2pb(Message &msg, const char *buf, size_t size)
 	json_t *root;
 	json_error_t error;
 
-	root = json_loadb(buf, size, 0, &error);
+	root = json_loadb(buf, size, JSON_DECODE_INT_AS_REAL, &error);
 
 	if (!root)
 		throw j2pb_error(std::string("Load failed: ") + error.text);
@@ -356,7 +356,7 @@ void json2pb(Message &msg, FILE *fp)
     json_t *root;
 	json_error_t error;
 
-	root = json_loadf(fp, JSON_DISABLE_EOF_CHECK, &error);
+	root = json_loadf(fp, JSON_DISABLE_EOF_CHECK | JSON_DECODE_INT_AS_REAL, &error);
 
 	if (!root)
 		throw j2pb_error(std::string("Load failed: ") + error.text);
