@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.13)
+cmake_minimum_required(VERSION 3.10)
 project(libvgio VERSION 0.0.0 LANGUAGES CXX)
 
 # Optimize by default, but also include debug info
@@ -63,6 +63,16 @@ ExternalProject_Add(handlegraph
 ExternalProject_Get_property(handlegraph INSTALL_DIR)
 set(handlegraph_INCLUDE "${INSTALL_DIR}/include")
 set(handlegraph_LIB "${INSTALL_DIR}/lib")
+
+if (CMAKE_MAJOR_VERSION EQUAL "3" AND (CMAKE_MINOR_VERSION EQUAL "10" OR CMAKE_MINOR_VERSION EQUAL "11"))
+    # Set link directories. We can't yet use target_link_directories to keep
+    # these straight between static and dynamic libraries since it's not
+    # available until cmake 3.13.
+    link_directories(
+        ${HTSlib_LIBRARY_DIRS} ${Jansson_LIBRARY_DIRS}
+        ${HTSlib_STATIC_LIBRARY_DIRS} ${Jansson_STATIC_LIBRARY_DIRS}
+    )
+endif()
 
 # Set where the LC_ID_DYLIB install name for Mac dylib files ought to point.
 # It ought to point to where the dylibs will actually be installed
@@ -139,14 +149,17 @@ target_link_libraries(vgio_static
     PUBLIC
         ${Protobuf_STATIC_LIBRARIES} Threads::Threads ${HTSlib_STATIC_LIBRARIES} ${Jansson_LIBRARIES} ${handlegraph_LIB}/libhandlegraph${CMAKE_STATIC_LIBRARY_SUFFIX} ${PLATFORM_EXTRA_LIB_FLAGS} OpenMP::OpenMP_CXX
 )
-target_link_directories(vgio
-    PUBLIC
-        ${HTSlib_LIBRARY_DIRS} ${Jansson_LIBRARY_DIRS}
-)
-target_link_directories(vgio_static
-    PUBLIC
-        ${HTSlib_STATIC_LIBRARY_DIRS} ${Jansson_STATIC_LIBRARY_DIRS}
-)
+
+if (NOT (CMAKE_MAJOR_VERSION EQUAL "3" AND (CMAKE_MINOR_VERSION EQUAL "10" OR CMAKE_MINOR_VERSION EQUAL "11")))
+    target_link_directories(vgio
+        PUBLIC
+            ${HTSlib_LIBRARY_DIRS} ${Jansson_LIBRARY_DIRS}
+    )
+    target_link_directories(vgio_static
+        PUBLIC
+            ${HTSlib_STATIC_LIBRARY_DIRS} ${Jansson_STATIC_LIBRARY_DIRS}
+    )
+endif()
 
 # Installation instructions
 
