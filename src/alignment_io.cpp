@@ -386,7 +386,10 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length, fun
             auto& annotation = aln.annotation();
             if (annotation.fields().count("proper_pair")) {
                 bool is_properly_paired = (annotation.fields().at("proper_pair")).bool_value();
-            gaf.opt_fields["pd"] = make_pair("b", is_properly_paired ? "1" : "0");
+                gaf.opt_fields["pd"] = make_pair("b", is_properly_paired ? "1" : "0");
+            }
+            if (annotation.fields().count("support")) {
+                gaf.opt_fields["AD"] = make_pair("i", (annotation.fields().at("support")).string_value());
             }
         }
     }
