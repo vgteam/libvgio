@@ -271,7 +271,7 @@ auto ProtobufIterator<T>::parse_from_string(T& dest, const string& data) -> bool
     google::protobuf::io::CodedInputStream coded_stream(&array_stream);
     
     // Up the total byte limit
-    coded_stream.SetTotalBytesLimit(MessageIterator::MAX_MESSAGE_SIZE * 2, MessageIterator::MAX_MESSAGE_SIZE * 2);
+    coded_stream.SetTotalBytesLimit(MessageIterator::MAX_MESSAGE_SIZE * 2);
     
     // Now actually parse the message
     return dest.ParseFromCodedStream(&coded_stream);

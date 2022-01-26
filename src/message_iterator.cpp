@@ -189,7 +189,7 @@ auto MessageIterator::operator++() -> const MessageIterator& {
         // Make a CodedInputStream to read the group length
         ::google::protobuf::io::CodedInputStream coded_in(bgzip_in.get());
         // Alot space for group's length, tag's length, and tag (generously)
-        coded_in.SetTotalBytesLimit(MAX_MESSAGE_SIZE * 2, MAX_MESSAGE_SIZE * 2);
+        coded_in.SetTotalBytesLimit(MAX_MESSAGE_SIZE * 2);
         
         // Try and read the group's length
         if (!coded_in.ReadVarint64((::google::protobuf::uint64*) &group_count)) {
@@ -325,7 +325,7 @@ auto MessageIterator::operator++() -> const MessageIterator& {
     // We need a fresh CodedInputStream every time, because of the total byte limit
     ::google::protobuf::io::CodedInputStream coded_in(bgzip_in.get());
     // Alot space for size and item (generously)
-    coded_in.SetTotalBytesLimit(MAX_MESSAGE_SIZE * 2, MAX_MESSAGE_SIZE * 2);
+    coded_in.SetTotalBytesLimit(MAX_MESSAGE_SIZE * 2);
     
     // A message starts here
     if (virtual_offset == -1) {
