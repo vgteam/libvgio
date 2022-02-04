@@ -283,6 +283,7 @@ message Visit {
     // The node ID or snarl of this step (only one should be given)
     int64 node_id = 1;
     Snarl snarl = 2; // only needs to contain the start and end Visits
+    string name = 4; // The segment name of this step.
 
     // Indicates:
     //   if node_id is specified     reverse complement of node
