@@ -188,6 +188,226 @@ size_t gaf_paired_interleaved_for_each_parallel_after_wait(const HandleGraph& gr
     return gaf_paired_interleaved_for_each_parallel_after_wait(node_to_length, node_to_sequence, filename, lambda, single_threaded_until_true, batch_size);
 }
 
+gafkluge::GafRecord alignment_to_gaf_old(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const Alignment& aln, bool cs_cigar, bool base_quals, bool frag_links) {
+
+    gafkluge::GafRecord gaf;
+
+    //1 string Query sequence name
+    gaf.query_name = aln.name();
+
+    //2 int Query sequence length
+    gaf.query_length = aln.sequence().length();
+
+    //12 int Mapping quality (0-255; 255 for missing)
+    //Note: protobuf can't distinguish between 0 and missing so we just copy it through
+    gaf.mapq = aln.mapping_quality();
+
+    if (aln.has_path() && aln.path().mapping_size() > 0) {    
+        //3 int Query start (0-based; closed)
+        gaf.query_start = 0; //(aln.path().mapping_size() ? first_path_position(aln.path()).offset() : "*") << "\t"
+        //4 int Query end (0-based; open)
+        gaf.query_end = aln.sequence().length();
+        //5 char Strand relative to the path: "+" or "-"
+        gaf.strand = '+'; // always positive relative to the path
+        //7 int Path length
+        gaf.path_length = 0;
+        //8 int Start position on the path (0-based)
+        gaf.path_start = gafkluge::missing_int;
+        //10 int Number of residue matches
+        gaf.matches = 0;
+        gaf.path.reserve(aln.path().mapping_size());
+        string cs_cigar_str;
+        size_t running_match_length = 0;
+        size_t total_to_len = 0;
+        size_t prev_offset;
+        for (size_t i = 0; i < aln.path().mapping_size(); ++i) {
+            auto& mapping = aln.path().mapping(i);
+            size_t offset = mapping.position().offset();
+            string node_seq;
+            const Position& position = mapping.position();
+            bool skip_step = false;
+            if (i == 0) {
+                // use path_start to store the offset of the first node
+                gaf.path_start = offset;
+            } else if (cs_cigar == true && offset > 0) {
+                if (offset == prev_offset && mapping.position().node_id() == aln.path().mapping(i -1).position().node_id() &&
+                    mapping.position().is_reverse() == aln.path().mapping(i -1).position().is_reverse()) {
+                    // our mapping is redundant, we won't write a step for it
+                    skip_step = true;
+                } else {
+                    // to support split-mappings we gobble up the beginnings
+                    // of nodes using deletions since unlike GAM, we can only
+                    // set the offset of the first node
+                    if (node_seq.empty()) {
+                        node_seq = node_to_sequence(position.node_id(), position.is_reverse());
+                    }
+                    cs_cigar_str += "-" + node_seq.substr(0, offset);
+                }
+            }
+            for (size_t j = 0; j < mapping.edit_size(); ++j) {
+                auto& edit = mapping.edit(j);
+                if (edit_is_match(edit)) {
+                    gaf.matches += edit.from_length();
+                }
+                if (cs_cigar == true) {
+                    // CS-cigar string
+                    if (edit_is_match(edit)) {
+                        // Merge up matches that span edits/mappings
+                        running_match_length += edit.from_length();
+                    } else {
+                        if (running_match_length > 0) {
+                            // Matches are : followed by the match length
+                            cs_cigar_str += ":" + std::to_string(running_match_length);
+                            running_match_length = 0;
+                        }
+                        if (edit_is_sub(edit)) {
+                            if (node_seq.empty()) {
+                                node_seq = node_to_sequence(position.node_id(), position.is_reverse());
+                            }
+                            // Substitions expressed one base at a time, preceded by *
+                            for (size_t k = 0; k < edit.from_length(); ++k) {
+                                cs_cigar_str += "*" + node_seq.substr(offset + k, 1) + edit.sequence().substr(k, 1); 
+                            }
+                        } else if (edit_is_deletion(edit)) {
+                            if (node_seq.empty()) {
+                                node_seq = node_to_sequence(position.node_id(), position.is_reverse());
+                            }
+                            // Deletion is - followed by deleted sequence
+                            assert(offset + edit.from_length() <= node_seq.length());
+                            cs_cigar_str += "-" + node_seq.substr(offset, edit.from_length());
+                        } else if (edit_is_insertion(edit)) {
+                            // Insertion is "+" followed by inserted sequence
+                            cs_cigar_str += "+" + edit.sequence();
+                        }
+                    }
+                }
+                offset += edit.from_length();
+                total_to_len += edit.to_length();
+            }
+
+            if (i < aln.path().mapping_size() - 1 && offset != node_to_length(position.node_id())) {
+                if (mapping.position().node_id() != aln.path().mapping(i + 1).position().node_id() ||
+                    mapping.position().is_reverse() != aln.path().mapping(i + 1).position().is_reverse()) {
+                    // we are hopping off the middle of a node, need to gobble it up with a deletion
+                    if (node_seq.empty()) {
+                        node_seq = node_to_sequence(position.node_id(), position.is_reverse());
+                    }
+                    if (running_match_length > 0) {
+                        // Matches are : followed by the match length
+                        cs_cigar_str += ":" + std::to_string(running_match_length);
+                        running_match_length = 0;
+                    }
+                    cs_cigar_str += "-" + node_seq.substr(offset);
+                } else {
+                    // we have a duplicate node mapping.  vg map actually produces these sometimes
+                    // where an insert gets its own mapping even though its from_length is 0
+                    // the gaf cigar format assumes nodes are fully covered, so we squish it out.
+                    skip_step = true;
+                }
+            }
+            
+            //6 string Path matching /([><][^\s><]+(:\d+-\d+)?)+|([^\s><]+)/
+            if (!skip_step) {
+                auto& position = mapping.position();
+                gafkluge::GafStep step;
+                step.name = std::to_string(position.node_id());
+                step.is_stable = false;
+                step.is_reverse = position.is_reverse();
+                step.is_interval = false;
+                gaf.path_length += node_to_length(position.node_id());
+                if (i == 0) {
+                    gaf.path_start = position.offset();
+                }
+                gaf.path.push_back(std::move(step));
+            }
+            
+            if (i == aln.path().mapping_size()-1) {
+                //9 int End position on the path (0-based)
+                gaf.path_end = gaf.path_start;
+                if (gaf.path_length > offset) {
+                    assert(!gafkluge::is_missing(gaf.path_start));
+                    // path_length - 1 marks the last position of our path.  we subtract out
+                    // the regions between offset and here to get the end
+                    gaf.path_end = gaf.path_length - 1 - (node_to_length(position.node_id()) - offset);
+                }
+            }
+
+            prev_offset = offset;
+        }
+        if (cs_cigar && running_match_length > 0) {
+            cs_cigar_str += ":" + std::to_string(running_match_length);
+            running_match_length = 0;
+        }
+
+        // We can support gam alignments without sequences by inferring the sequence length from edits
+        if (gaf.query_length == 0 && total_to_len > 0) {
+            gaf.query_length = total_to_len;
+            gaf.query_end = total_to_len;
+        } 
+
+        //11 int Alignment block length
+        gaf.block_length = std::max(gaf.path_end - gaf.path_start, gaf.query_length);
+
+        // optional cs-cigar string
+        if (cs_cigar) {
+            gaf.opt_fields["cs"] = make_pair("Z", std::move(cs_cigar_str));
+        }
+
+        // convert the identity into the dv divergence field
+        // https://lh3.github.io/minimap2/minimap2.html#10
+        if (aln.identity() > 0) {
+            stringstream dv_str;
+            dv_str << std::floor((1. - aln.identity()) * 10000. + 0.5) / 10000.;
+            gaf.opt_fields["dv"] = make_pair("f", dv_str.str());
+        }
+
+        // convert the score into the AS field
+        // https://lh3.github.io/minimap2/minimap2.html#10
+        if (aln.score() > 0) {
+            gaf.opt_fields["AS"] = make_pair("i", std::to_string(aln.score()));
+        }
+
+        // optional base qualities
+        if (base_quals && !aln.quality().empty()) { 
+            gaf.opt_fields["bq"] = make_pair("Z", string_quality_short_to_char(aln.quality()));
+        }
+
+        // optional frag_next/prev names
+        if (frag_links == true) {
+            if (aln.has_fragment_next()) {
+                gaf.opt_fields["fn"] = make_pair("Z", aln.fragment_next().name());
+            }
+            if (aln.has_fragment_prev()) {
+                gaf.opt_fields["fp"] = make_pair("Z", aln.fragment_prev().name());
+            }
+        }
+
+        if (aln.has_annotation()) {
+            auto& annotation = aln.annotation();
+            if (annotation.fields().count("proper_pair")) {
+                bool is_properly_paired = (annotation.fields().at("proper_pair")).bool_value();
+                gaf.opt_fields["pd"] = make_pair("b", is_properly_paired ? "1" : "0");
+            }
+            if (annotation.fields().count("support")) {
+                gaf.opt_fields["AD"] = make_pair("i", (annotation.fields().at("support")).string_value());
+            }
+        }
+    }
+
+    return gaf;    
+}
+
+gafkluge::GafRecord alignment_to_gaf_old(const HandleGraph& graph, const Alignment& aln, bool cs_cigar, bool base_quals, bool frag_links) {
+    function<size_t(nid_t)> node_to_length = [&graph](nid_t node_id) {
+        return graph.get_length(graph.get_handle(node_id));
+    };
+    function<string(nid_t, bool)> node_to_sequence = [&graph](nid_t node_id, bool is_reversed) {
+        return graph.get_sequence(graph.get_handle(node_id, is_reversed));
+    };
+    return alignment_to_gaf_old(node_to_length, node_to_sequence, aln, cs_cigar, base_quals, frag_links);
+}
+
+
 gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
                                      function<string(nid_t, bool)> node_to_sequence,
                                      const Alignment& aln,
