@@ -188,7 +188,23 @@ size_t gaf_paired_interleaved_for_each_parallel_after_wait(const HandleGraph& gr
     return gaf_paired_interleaved_for_each_parallel_after_wait(node_to_length, node_to_sequence, filename, lambda, single_threaded_until_true, batch_size);
 }
 
-gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const Alignment& aln, bool cs_cigar, bool base_quals, bool frag_links) {
+gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
+                                     function<string(nid_t, bool)> node_to_sequence,
+                                     const Alignment& aln,
+                                     const handlegraph::NamedNodeBackTranslation* translate_through,
+                                     bool cs_cigar,
+                                     bool base_quals,
+                                     bool frag_links) {
+
+    // TODO: We can't support translations with alignments that end up split
+    // (arriving to or leaving from the middle of a segment) in segment space,
+    // even if they weren't split in node space, but we also can't *detect*
+    // them, because we don't have a way to get lengths and sequences of entire
+    // segments, because NamedNodeBackTranslation doesn't provide functions
+    // that go the right direction. So results will be wrong if such alignments
+    // are provided!
+    // Don't use translation with graphs where segments have been anything but
+    // straightforwardly chopped, or where any alignments are split/can jump!
 
     gafkluge::GafRecord gaf;
 
@@ -220,31 +236,20 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length, fun
         size_t running_match_length = 0;
         size_t total_to_len = 0;
         size_t prev_offset;
+        handlegraph::oriented_node_range_t prev_range;
         for (size_t i = 0; i < aln.path().mapping_size(); ++i) {
             auto& mapping = aln.path().mapping(i);
-            size_t offset = mapping.position().offset();
-            string node_seq;
             const Position& position = mapping.position();
+            size_t start_offset_on_node = position.offset();
+            // This is our offset along the graph node, and is advanced as a
+            // cursor as we look at the edits.
+            size_t offset = start_offset_on_node;
+            size_t node_length = node_to_length(position.node_id());
+            string node_seq;
             bool skip_step = false;
-            if (i == 0) {
-                // use path_start to store the offset of the first node
-                gaf.path_start = offset;
-            } else if (cs_cigar == true && offset > 0) {
-                if (offset == prev_offset && mapping.position().node_id() == aln.path().mapping(i -1).position().node_id() &&
-                    mapping.position().is_reverse() == aln.path().mapping(i -1).position().is_reverse()) {
-                    // our mapping is redundant, we won't write a step for it
-                    skip_step = true;
-                } else {
-                    // to support split-mappings we gobble up the beginnings
-                    // of nodes using deletions since unlike GAM, we can only
-                    // set the offset of the first node
-                    if (node_seq.empty()) {
-                        node_seq = node_to_sequence(position.node_id(), position.is_reverse());
-                    }
-                    cs_cigar_str += "-" + node_seq.substr(0, offset);
-                }
-            }
+            
             for (size_t j = 0; j < mapping.edit_size(); ++j) {
+                // Scan the edits and work out how much we span on the node.
                 auto& edit = mapping.edit(j);
                 if (edit_is_match(edit)) {
                     gaf.matches += edit.from_length();
@@ -284,11 +289,70 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length, fun
                 offset += edit.from_length();
                 total_to_len += edit.to_length();
             }
+            
+            // Determine the range on a node we are aligned against
+            handlegraph::oriented_node_range_t range(position.node_id(), position.is_reverse(),
+                                                     start_offset_on_node, offset - start_offset_on_node);
+            
+            if (translate_through) {
+                // We need to articulate this step on the path
+                // back-translated to segment name space, and skip
+                // duplicate segment names that aren't going around
+                // self-loops.
+                
+                // Translate it
+                std::vector<handlegraph::oriented_node_range_t> translated = translate_through->translate_back(range);
+                
+                if (translated.size() != 1) {
+                    // TODO: Implement translations that split graph nodes into multiple segments.
+                    throw std::runtime_error("Translated range on node " + std::to_string(std::get<0>(range)) +
+                                             " to " + std::to_string(translated.size()) + 
+                                             " named segment ranges, but complex translations like this are not yet implemented");
+                }
+                
+                auto& translated_range = translated[0];
+                if (std::get<1>(translated_range) != std::get<1>(range)) {
+                    // TODO: Implement translations that flip orientations.
+                    throw std::runtime_error("Translated range on node " + std::to_string(std::get<0>(range)) +
+                                             " ended up on the opposite strand; complex translations like this are not yet implemented");
+                }
+                
+                // Commit back the translation
+                range = translated_range;
+            }
+            
+            if (i == 0) {
+                // use path_start to store the offset of the first node
+                gaf.path_start = std::get<2>(range);
+            } else if (cs_cigar == true && start_offset_on_node > 0) {
+                if (start_offset_on_node == prev_offset && position.node_id() == aln.path().mapping(i -1).position().node_id() &&
+                    position.is_reverse() == aln.path().mapping(i -1).position().is_reverse()) {
+                    // our mapping is redundant, we won't write a step for it
+                    skip_step = true;
+                } else {
+                    // to support split-mappings we gobble up the beginnings
+                    // of nodes using deletions since unlike GAM, we can only
+                    // set the offset of the first node
+                    if (translate_through) {
+                        // We can't do this if we don't have a way to get segment lengths, and that's not in the interface yet.
+                        throw std::runtime_error("Split alignments cannot be converted to named-segment-space GAF");
+                    }
+                    if (node_seq.empty()) {
+                        node_seq = node_to_sequence(position.node_id(), position.is_reverse());
+                    }
+                    cs_cigar_str += "-" + node_seq.substr(0, start_offset_on_node);
+                }
+            }
 
-            if (i < aln.path().mapping_size() - 1 && offset != node_to_length(position.node_id())) {
-                if (mapping.position().node_id() != aln.path().mapping(i + 1).position().node_id() ||
-                    mapping.position().is_reverse() != aln.path().mapping(i + 1).position().is_reverse()) {
+            if (i < aln.path().mapping_size() - 1 && offset != node_length) {
+                // We aren't the last mapping but we are ending before our node is done
+                if (position.node_id() != aln.path().mapping(i + 1).position().node_id() ||
+                    position.is_reverse() != aln.path().mapping(i + 1).position().is_reverse()) {
                     // we are hopping off the middle of a node, need to gobble it up with a deletion
+                    if (translate_through) {
+                        // We can't do this if we don't have a way to get segment lengths, and that's not in the interface yet.
+                        throw std::runtime_error("Split alignments cannot be converted to named-segment-space GAF");
+                    }
                     if (node_seq.empty()) {
                         node_seq = node_to_sequence(position.node_id(), position.is_reverse());
                     }
@@ -308,30 +372,68 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length, fun
             
             //6 string Path matching /([><][^\s><]+(:\d+-\d+)?)+|([^\s><]+)/
             if (!skip_step) {
-                auto& position = mapping.position();
-                gafkluge::GafStep step;
-                step.name = std::to_string(position.node_id());
-                step.is_stable = false;
-                step.is_reverse = position.is_reverse();
-                step.is_interval = false;
-                gaf.path_length += node_to_length(position.node_id());
+                gaf.path_length += node_length;
+                
+                // Now we consult range for things like the offset
                 if (i == 0) {
-                    gaf.path_start = position.offset();
+                    // Update the stored path start according to any pieces of
+                    // the node that needed skipping.
+                    gaf.path_start = offset - mapping.position().offset() + std::get<2>(range);
+                } else if (translate_through) {
+                    // We need to filter out consecutive visits to pieces of
+                    // the same segment that abut each other, so we don't get
+                    // the segment named multiple times. We keep pieces that
+                    // don't abut each other but look like going around a self
+                    // loop, and we bail out (for now) on pieces that
+                    // arbitrarily jump around the segment, since we don't know
+                    // how to synthesize the deletions.
+                    // TODO: jumps ahead could be synthesized into deletions relatively easily.
+                    if (std::get<0>(range) == std::get<0>(prev_range) &&
+                        std::get<1>(range) == std::get<1>(prev_range)) {
+                        // We're on the same segment and orientation as the last mapping
+                        if (std::get<2>(range) == std::get<2>(prev_range) + std::get<3>(prev_range)) {
+                            // And we abut perfectly; nothing has been skipped over.
+                            // We don't need to report the segment again in the GAF path.
+                            skip_step = true;
+                        } else if (std::get<2>(range) != 0) {
+                            // We're arriving at the same segment at somewhere
+                            // other than the start. This is definitely a split
+                            // alignment in segment space! We can't handle
+                            // those yet!
+                            throw std::runtime_error("Alignments that become split in segment space cannot be converted to named-segment-space GAF");
+                        }
+                        // Otherwise we're arriving at the start of the same
+                        // segment. Still might be a split alignment that we
+                        // forbid, but if not we do want to report the same
+                        // segment again because we go through it again.
+                    }
                 }
-                gaf.path.push_back(std::move(step));
+                
+                if (!skip_step) {
+                    // Actually report this visit to this node or segment.
+                    gafkluge::GafStep step;
+                    step.name = translate_through ? translate_through->get_back_graph_node_name(std::get<0>(range)) : std::to_string(std::get<0>(range));
+                    step.is_stable = false;
+                    step.is_reverse = std::get<1>(range);
+                    step.is_interval = false;
+                    
+                    gaf.path.push_back(std::move(step));
+                }
             }
             
             if (i == aln.path().mapping_size()-1) {
                 //9 int End position on the path (0-based)
                 gaf.path_end = gaf.path_start;
-                if (gaf.path_length > offset) {
+                size_t offset_on_path_visit = offset - mapping.position().offset() + std::get<2>(range);
+                if (gaf.path_length > offset_on_path_visit) {
                     assert(!gafkluge::is_missing(gaf.path_start));
                     // path_length - 1 marks the last position of our path.  we subtract out
                     // the regions between offset and here to get the end
-                    gaf.path_end = gaf.path_length - 1 - (node_to_length(position.node_id()) - offset);
+                    gaf.path_end = gaf.path_length - 1 - (node_to_length(position.node_id()) - offset_on_path_visit);
                 }
             }
 
+            prev_range = range;
             prev_offset = offset;
         }
         if (cs_cigar && running_match_length > 0) {
@@ -397,17 +499,26 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length, fun
     return gaf;    
 }
 
-gafkluge::GafRecord alignment_to_gaf(const HandleGraph& graph, const Alignment& aln, bool cs_cigar, bool base_quals, bool frag_links) {
+gafkluge::GafRecord alignment_to_gaf(const HandleGraph& graph,
+                                     const Alignment& aln,
+                                     const handlegraph::NamedNodeBackTranslation* translate_through,
+                                     bool cs_cigar,
+                                     bool base_quals,
+                                     bool frag_links) {
+
     function<size_t(nid_t)> node_to_length = [&graph](nid_t node_id) {
         return graph.get_length(graph.get_handle(node_id));
     };
     function<string(nid_t, bool)> node_to_sequence = [&graph](nid_t node_id, bool is_reversed) {
         return graph.get_sequence(graph.get_handle(node_id, is_reversed));
     };
-    return alignment_to_gaf(node_to_length, node_to_sequence, aln, cs_cigar, base_quals, frag_links);
+    return alignment_to_gaf(node_to_length, node_to_sequence, aln, translate_through, cs_cigar, base_quals, frag_links);
 }
 
-void gaf_to_alignment(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const gafkluge::GafRecord& gaf, Alignment& aln){
+void gaf_to_alignment(function<size_t(nid_t)> node_to_length,
+                      function<string(nid_t, bool)> node_to_sequence,
+                      const gafkluge::GafRecord& gaf,
+                      Alignment& aln){
 
     aln.Clear();
 
@@ -570,7 +681,10 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length, function<string(ni
     }
 }
 
-void gaf_to_alignment(const HandleGraph& graph, const gafkluge::GafRecord& gaf, Alignment& aln) {
+void gaf_to_alignment(const HandleGraph& graph,
+                      const gafkluge::GafRecord& gaf,
+                      Alignment& aln) {
+
     function<size_t(nid_t)> node_to_length = [&graph](nid_t node_id) {
         return graph.get_length(graph.get_handle(node_id));
     };
