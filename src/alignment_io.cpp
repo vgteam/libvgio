@@ -464,6 +464,8 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
             // This is our offset along the graph node, and is advanced as a
             // cursor as we look at the edits.
             size_t offset = start_offset_on_node;
+            // This is our difference from node offset to segment offset, if applicable
+            size_t node_to_segment_offset = 0;
             size_t node_length = node_to_length(position.node_id());
             string node_seq;
             bool skip_step = false;
@@ -537,6 +539,8 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
                                              " ended up on the opposite strand; complex translations like this are not yet implemented");
                 }
                 
+                // Record how far ahead the node is of the segment
+                node_to_segment_offset = get<2>(translated_range) - get<2>(range);
                 // Commit back the translation
                 range = translated_range;
             }
@@ -596,9 +600,11 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
                 
                 // Now we consult range for things like the offset
                 if (i == 0) {
-                    // Update the stored path start according to any pieces of
-                    // the node that needed skipping.
-                    gaf.path_start = offset - mapping.position().offset() + std::get<2>(range);
+                    // Update the stored path start.
+                    // TODO: didn't we do this already?
+                    gaf.path_start = std::get<2>(range);
+                    // Account for any part of the path in the segment before our first node
+                    gaf.path_length += node_to_segment_offset;
                 } else if (translate_through) {
                     // We need to filter out consecutive visits to pieces of
                     // the same segment that abut each other, so we don't get
@@ -644,12 +650,28 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
             if (i == aln.path().mapping_size()-1) {
                 //9 int End position on the path (0-based)
                 gaf.path_end = gaf.path_start;
-                size_t offset_on_path_visit = offset - mapping.position().offset() + std::get<2>(range);
+                // What's the offset cursor we're at on the segment, if
+                // different from where we are on the node?
+                size_t offset_on_path_visit = offset + node_to_segment_offset;
                 if (gaf.path_length > offset_on_path_visit) {
                     assert(!gafkluge::is_missing(gaf.path_start));
                     // path_length - 1 marks the last position of our path.  we subtract out
                     // the regions between offset and here to get the end
-                    gaf.path_end = gaf.path_length - 1 - (node_to_length(position.node_id()) - offset_on_path_visit);
+                    gaf.path_end = gaf.path_length - 1 - (node_length - offset_on_path_visit);
+                }
+                if (translate_through) {
+                    // But we also have to account int he path length for the part
+                    // of the segment that comes after the node we stop at. So
+                    // translate offset 0 on its reverse strand to measure the
+                    // offset from there to the segment end.
+                    handlegraph::oriented_node_range_t stop_pos_rev_strand(position.node_id(), !position.is_reverse(),
+                                                                           0, 0);
+                    
+                
+                    // Translate it
+                    std::vector<handlegraph::oriented_node_range_t> translated = translate_through->translate_back(stop_pos_rev_strand);
+                    // Add any offset to the path length.
+                    gaf.path_length += std::get<2>(translated.at(0));
                 }
             }
 
