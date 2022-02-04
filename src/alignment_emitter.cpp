@@ -44,7 +44,7 @@ void AlignmentEmitter::emit_mapped_pair(vector<Alignment>&& alns1, vector<Alignm
 }
 
 unique_ptr<AlignmentEmitter> get_non_hts_alignment_emitter(const string& filename, const string& format,
-    const map<string, int64_t>& path_length, size_t max_threads, const HandleGraph* graph) {
+    const map<string, int64_t>& path_length, size_t max_threads, const HandleGraph* graph, const handlegraph::NamedNodeBackTranslation* translate_through) {
 
     // Make the backing, non-buffered emitter
     AlignmentEmitter* backing = nullptr;
@@ -52,7 +52,7 @@ unique_ptr<AlignmentEmitter> get_non_hts_alignment_emitter(const string& filenam
         // Make an emitter that supports VG formats
         backing = new VGAlignmentEmitter(filename, format, max_threads);
     } else if (format == "GAF") {
-        backing = new GafAlignmentEmitter(filename, format, *graph, max_threads);
+        backing = new GafAlignmentEmitter(filename, format, *graph, max_threads, translate_through);
     } else if (format == "TSV") {
         backing = new TSVAlignmentEmitter(filename, max_threads);
     } else {
@@ -386,11 +386,12 @@ void VGAlignmentEmitter::emit_mapped_pairs(vector<vector<Alignment>>&& alns1_bat
 
 GafAlignmentEmitter::GafAlignmentEmitter(const string& filename,
                                          const string& format,
-                                         const HandleGraph& _graph,
-                                         size_t max_threads):
+                                         const HandleGraph& graph,
+                                         size_t max_threads,
+                                         const handlegraph::NamedNodeBackTranslation* translate_through):
     out_file(filename == "-" ? nullptr : new ofstream(filename)),
     multiplexer(out_file.get() != nullptr ? *out_file : cout, max_threads),
-    graph(_graph) {
+    graph(graph), translate_through(translate_through) {
     
     // We only support GAF format
     assert(format == "GAF");
@@ -435,7 +436,7 @@ void GafAlignmentEmitter::emit_singles(vector<Alignment>&& aln_batch) {
     size_t thread_number = omp_get_thread_num();
     // Serialize to a string in our thread
     for (auto& aln : aln_batch) {
-        multiplexer.get_thread_stream(thread_number) << alignment_to_gaf(graph, aln) << endl;
+        multiplexer.get_thread_stream(thread_number) << alignment_to_gaf(graph, aln, translate_through) << endl;
     }
     // No need to flush, we can always register a breakpoint.
     multiplexer.register_breakpoint(thread_number);
@@ -446,7 +447,7 @@ void GafAlignmentEmitter::emit_mapped_singles(vector<vector<Alignment>>&& alns_b
     // Serialize to a string in our thread
     for (auto& alns : alns_batch) {
         for (auto& aln : alns) {
-            multiplexer.get_thread_stream(thread_number) << alignment_to_gaf(graph, aln) << endl;
+            multiplexer.get_thread_stream(thread_number) << alignment_to_gaf(graph, aln, translate_through) << endl;
         }
     }
     // No need to flush, we can always register a breakpoint.
@@ -467,8 +468,8 @@ void GafAlignmentEmitter::emit_pairs(vector<Alignment>&& aln1_batch,
     
     // Serialize to a string in our thread in collated order
     for (size_t i = 0; i < aln1_batch.size(); i++) {
-        multiplexer.get_thread_stream(thread_number) << alignment_to_gaf(graph, aln1_batch[i]) << endl
-                                                     << alignment_to_gaf(graph, aln2_batch[i]) << endl;
+        multiplexer.get_thread_stream(thread_number) << alignment_to_gaf(graph, aln1_batch[i], translate_through) << endl
+                                                     << alignment_to_gaf(graph, aln2_batch[i], translate_through) << endl;
     }
     // No need to flush, we can always register a breakpoint.
     multiplexer.register_breakpoint(thread_number);
@@ -486,8 +487,8 @@ void GafAlignmentEmitter::emit_mapped_pairs(vector<vector<Alignment>>&& alns1_ba
     for (size_t i = 0; i < alns1_batch.size(); i++) {
         assert(alns1_batch[i].size() == alns1_batch[i].size());
         for (size_t j = 0; j < alns1_batch[i].size(); j++) {
-            multiplexer.get_thread_stream(thread_number) << alignment_to_gaf(graph, alns1_batch[i][j]) << endl
-                                                         << alignment_to_gaf(graph, alns2_batch[i][j]) << endl;
+            multiplexer.get_thread_stream(thread_number) << alignment_to_gaf(graph, alns1_batch[i][j], translate_through) << endl
+                                                         << alignment_to_gaf(graph, alns2_batch[i][j], translate_through) << endl;
         }
     }
     // No need to flush, we can always register a breakpoint.
