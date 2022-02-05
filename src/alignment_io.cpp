@@ -244,6 +244,13 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length, fun
                     cs_cigar_str += "-" + node_seq.substr(0, offset);
                 }
             }
+            // this is another case that comes up, giraffe adds an empty mapping for a softclip at the
+            // end.  there's no real way for the GAF cigar to distinguish these, so make sure it doesn't come up
+            else if (i + 1 == aln.path().mapping_size() && i > 0 && aln.path().mapping(i).edit_size() == 1 &&
+                     edit_is_insertion(aln.path().mapping(i).edit(0))) {
+                skip_step = true;
+            }
+            
             for (size_t j = 0; j < mapping.edit_size(); ++j) {
                 auto& edit = mapping.edit(j);
                 if (edit_is_match(edit)) {
@@ -533,6 +540,23 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length, function<string(ni
                     }
                 }
             });
+
+        // this is to support gafs that were made from alignments where the last mapping is
+        // nothing but a soft clip:
+        // https://github.com/vgteam/vg/issues/3533
+        // note these cases will be prevented going forward in fix to alignment_to_gaf() to stop
+        // ambiguous gafs from being written in the first place
+        size_t num_mappings = aln.path().mapping_size();
+        if (num_mappings > 1 && aln.path().mapping(num_mappings - 1).edit_size() == 0 &&
+            aln.path().mapping(num_mappings - 2).edit_size() > 0 &&
+            edit_is_insertion(aln.path().mapping(num_mappings - 2).edit(aln.path().mapping(num_mappings - 2).edit_size() - 1))) {
+            Path path_cpy = aln.path();
+            aln.clear_path();
+            for (size_t i = 0; i < num_mappings - 1; ++i) {
+                *aln.mutable_path()->add_mapping() = path_cpy.mapping(i);
+            }
+        }
+        
         if (from_cg) {
             // remember that we came from a lossy cg-cigar -> GAM conversion path
             auto* annotation = aln.mutable_annotation();
