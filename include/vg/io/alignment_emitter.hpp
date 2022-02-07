@@ -19,7 +19,8 @@
 #include <vg/vg.pb.h>
 #include <vg/io/protobuf_emitter.hpp>
 #include <vg/io/stream_multiplexer.hpp>
-#include "handlegraph/handle_graph.hpp"
+#include <handlegraph/handle_graph.hpp>
+#include <handlegraph/named_node_back_translation.hpp>
 
 namespace vg {
 
@@ -104,7 +105,8 @@ public:
 /// get_alignment_emitter in hts_alignment_emitter.hpp
 unique_ptr<AlignmentEmitter> get_non_hts_alignment_emitter(const string& filename, const string& format, 
                                                            const map<string, int64_t>& path_length, size_t max_threads,
-                                                           const HandleGraph* graph = nullptr);
+                                                           const HandleGraph* graph = nullptr,
+                                                           const handlegraph::NamedNodeBackTranslation* translate_through = nullptr);
 
 /**
  * Discards all alignments.
@@ -210,7 +212,8 @@ public:
     GafAlignmentEmitter(const string& filename,
                         const string& format,
                         const HandleGraph& _graph,
-                        size_t max_threads);
+                        size_t max_threads,
+                        const handlegraph::NamedNodeBackTranslation* translate_through = nullptr);
     
     /// Finish and drstroy a VGAlignmentEmitter.
     ~GafAlignmentEmitter();
@@ -240,6 +243,9 @@ private:
 
     /// Graph that alignments were aligned against
     const HandleGraph& graph;
+    
+    /// Translation we should use to report in named segment coordinates, if any.
+    const handlegraph::NamedNodeBackTranslation* translate_through;
 };
 
 }
