@@ -105,6 +105,7 @@ set_property(TARGET vgio_static PROPERTY POSITION_INDEPENDENT_CODE OFF)
 add_dependencies(vgio link_target)
 add_dependencies(vgio_static link_target)
 add_dependencies(vgio handlegraph)
+add_dependencies(vgio_static handlegraph)
 
 # Add an alias so that library can be used inside the build tree, e.g. when testing
 add_library(VGio::vgio ALIAS vgio)
