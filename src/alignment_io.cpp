@@ -251,14 +251,7 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
             string node_seq;
             bool skip_step = false;
 
-            // Determine the range on a node we are aligned against
-            handlegraph::oriented_node_range_t range(position.node_id(), position.is_reverse(),
-                                                     start_offset_on_node, offset - start_offset_on_node);
-
-            if (i == 0) {
-                // use path_start to store the offset of the first node
-                gaf.path_start = std::get<2>(range);
-            } else if (cs_cigar == true && start_offset_on_node > 0) {
+            if (i > 0 && cs_cigar == true && start_offset_on_node > 0) {
                 if (start_offset_on_node == prev_offset && position.node_id() == aln.path().mapping(i -1).position().node_id() &&
                     position.is_reverse() == aln.path().mapping(i -1).position().is_reverse()) {
                     // our mapping is redundant, we won't write a step for it
@@ -344,7 +337,11 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
                 offset += edit.from_length();
                 total_to_len += edit.to_length();
             }
-                        
+
+            // Determine the range on a node we are aligned against
+            handlegraph::oriented_node_range_t range(position.node_id(), position.is_reverse(),
+                                                     start_offset_on_node, offset - start_offset_on_node);
+
             if (translate_through) {
                 // We need to articulate this step on the path
                 // back-translated to segment name space, and skip
@@ -373,11 +370,15 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
                 // Commit back the translation
                 range = translated_range;
             }
-            
-            // this is another case that comes up, giraffe adds an empty mapping for a softclip at the
-            // end.  there's no real way for the GAF cigar to distinguish these, so make sure it doesn't come up
-            else if (i + 1 == aln.path().mapping_size() && i > 0 && aln.path().mapping(i).edit_size() == 1 &&
-                     edit_is_insertion(aln.path().mapping(i).edit(0))) {
+
+            if (i == 0) {
+                // use path_start to store the offset of the first node
+                gaf.path_start = std::get<2>(range);
+                
+                // this is another case that comes up, giraffe adds an empty mapping for a softclip at the
+                // end.  there's no real way for the GAF cigar to distinguish these, so make sure it doesn't come up
+            } else if (i + 1 == aln.path().mapping_size() && i > 0 && aln.path().mapping(i).edit_size() == 1 &&
+                       edit_is_insertion(aln.path().mapping(i).edit(0))) {
                 skip_step = true;
             }
 
