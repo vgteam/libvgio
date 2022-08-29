@@ -234,6 +234,7 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
         gaf.path.reserve(aln.path().mapping_size());
         string cs_cigar_str;
         size_t running_match_length = 0;
+        bool running_deletion = false; // if set, can just print bases (without "-") to continue
         size_t total_to_len = 0;
         size_t prev_offset;
         handlegraph::oriented_node_range_t prev_range;
@@ -249,6 +250,51 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
             size_t node_length = node_to_length(position.node_id());
             string node_seq;
             bool skip_step = false;
+
+            // Determine the range on a node we are aligned against
+            handlegraph::oriented_node_range_t range(position.node_id(), position.is_reverse(),
+                                                     start_offset_on_node, offset - start_offset_on_node);
+
+            if (i == 0) {
+                // use path_start to store the offset of the first node
+                gaf.path_start = std::get<2>(range);
+            } else if (cs_cigar == true && start_offset_on_node > 0) {
+                if (start_offset_on_node == prev_offset && position.node_id() == aln.path().mapping(i -1).position().node_id() &&
+                    position.is_reverse() == aln.path().mapping(i -1).position().is_reverse()) {
+                    // our mapping is redundant, we won't write a step for it
+                    skip_step = true;
+                } else {
+                    // to support split-mappings we gobble up the beginnings
+                    // of nodes using deletions since unlike GAM, we can only
+                    // set the offset of the first node
+                    if (translate_through) {
+                        // We can't do this if we don't have a way to get segment lengths, and that's not in the interface yet.
+                        throw std::runtime_error("Split alignments cannot be converted to named-segment-space GAF");
+                    }
+                    if (node_seq.empty()) {
+                        node_seq = node_to_sequence(position.node_id(), position.is_reverse());
+                    }
+                    // vg's chunked mapper will happily add new Mappings on the same node
+                    // so we try to keep that in mind here where we subtract out the previous offset
+                    // before deleting to not double count
+                    int64_t del_start_offset = 0;
+                    if (position.node_id() == aln.path().mapping(i - 1).position().node_id()) {
+                        del_start_offset = prev_offset;
+                    }
+                    if (start_offset_on_node > del_start_offset) {
+                        if (running_match_length > 0) {
+                            // Matches are : followed by the match length
+                            cs_cigar_str += ":" + std::to_string(running_match_length);
+                            running_match_length = 0;
+                        }
+                        if (!running_deletion) {
+                            cs_cigar_str += "-";
+                        }
+                        cs_cigar_str += node_seq.substr(del_start_offset, start_offset_on_node - del_start_offset);
+                        running_deletion = true;
+                    }
+                }
+            }
             
             for (size_t j = 0; j < mapping.edit_size(); ++j) {
                 // Scan the edits and work out how much we span on the node.
@@ -261,11 +307,12 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
                     if (edit_is_match(edit)) {
                         // Merge up matches that span edits/mappings
                         running_match_length += edit.from_length();
+                        running_deletion = false;
                     } else {
                         if (running_match_length > 0) {
                             // Matches are : followed by the match length
                             cs_cigar_str += ":" + std::to_string(running_match_length);
-                            running_match_length = 0;
+                            running_match_length = 0;                            
                         }
                         if (edit_is_sub(edit)) {
                             if (node_seq.empty()) {
@@ -275,27 +322,29 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
                             for (size_t k = 0; k < edit.from_length(); ++k) {
                                 cs_cigar_str += "*" + node_seq.substr(offset + k, 1) + edit.sequence().substr(k, 1); 
                             }
+                            running_deletion = false;
                         } else if (edit_is_deletion(edit)) {
                             if (node_seq.empty()) {
                                 node_seq = node_to_sequence(position.node_id(), position.is_reverse());
                             }
                             // Deletion is - followed by deleted sequence
                             assert(offset + edit.from_length() <= node_seq.length());
-                            cs_cigar_str += "-" + node_seq.substr(offset, edit.from_length());
+                            if (!running_deletion) {
+                                cs_cigar_str += "-";
+                            }
+                            cs_cigar_str += node_seq.substr(offset, edit.from_length());
+                            running_deletion = true;
                         } else if (edit_is_insertion(edit)) {
                             // Insertion is "+" followed by inserted sequence
                             cs_cigar_str += "+" + edit.sequence();
+                            running_deletion = false;
                         }
                     }
                 }
                 offset += edit.from_length();
                 total_to_len += edit.to_length();
             }
-            
-            // Determine the range on a node we are aligned against
-            handlegraph::oriented_node_range_t range(position.node_id(), position.is_reverse(),
-                                                     start_offset_on_node, offset - start_offset_on_node);
-            
+                        
             if (translate_through) {
                 // We need to articulate this step on the path
                 // back-translated to segment name space, and skip
@@ -325,28 +374,6 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
                 range = translated_range;
             }
             
-            if (i == 0) {
-                // use path_start to store the offset of the first node
-                gaf.path_start = std::get<2>(range);
-            } else if (cs_cigar == true && start_offset_on_node > 0) {
-                if (start_offset_on_node == prev_offset && position.node_id() == aln.path().mapping(i -1).position().node_id() &&
-                    position.is_reverse() == aln.path().mapping(i -1).position().is_reverse()) {
-                    // our mapping is redundant, we won't write a step for it
-                    skip_step = true;
-                } else {
-                    // to support split-mappings we gobble up the beginnings
-                    // of nodes using deletions since unlike GAM, we can only
-                    // set the offset of the first node
-                    if (translate_through) {
-                        // We can't do this if we don't have a way to get segment lengths, and that's not in the interface yet.
-                        throw std::runtime_error("Split alignments cannot be converted to named-segment-space GAF");
-                    }
-                    if (node_seq.empty()) {
-                        node_seq = node_to_sequence(position.node_id(), position.is_reverse());
-                    }
-                    cs_cigar_str += "-" + node_seq.substr(0, start_offset_on_node);
-                }
-            }
             // this is another case that comes up, giraffe adds an empty mapping for a softclip at the
             // end.  there's no real way for the GAF cigar to distinguish these, so make sure it doesn't come up
             else if (i + 1 == aln.path().mapping_size() && i > 0 && aln.path().mapping(i).edit_size() == 1 &&
@@ -371,7 +398,11 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
                         cs_cigar_str += ":" + std::to_string(running_match_length);
                         running_match_length = 0;
                     }
-                    cs_cigar_str += "-" + node_seq.substr(offset);
+                    if (!running_deletion) {
+                        cs_cigar_str += "-";
+                    } 
+                    cs_cigar_str += node_seq.substr(offset);
+                    running_deletion = true;
                 } else {
                     // we have a duplicate node mapping.  vg map actually produces these sometimes
                     // where an insert gets its own mapping even though its from_length is 0
