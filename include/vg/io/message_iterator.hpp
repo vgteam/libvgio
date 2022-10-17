@@ -72,10 +72,10 @@ public:
     static string sniff_tag(::google::protobuf::io::ZeroCopyInputStream& stream);
 
     /// Constructor to wrap a stream.
-    MessageIterator(istream& in);
+    MessageIterator(istream& in, bool verbose = false);
     
     /// Constructor to wrap an existing BGZF 
-    MessageIterator(unique_ptr<BlockedGzipInputStream>&& bgzf);
+    MessageIterator(unique_ptr<BlockedGzipInputStream>&& bgzf, bool verbose = false);
     
     /// Represents a pair of a tag value and some message data.
     /// If there is no valid tag for a group, as given in the Registry, the tag will be "".
@@ -170,6 +170,9 @@ private:
     
     /// Since these streams can't be copied or moved, we wrap ours in a uniqueptr_t so we can be moved.
     unique_ptr<BlockedGzipInputStream> bgzip_in;
+    
+    /// Set this to true to print messages about what is being decoded.
+    bool verbose = false;
     
     /// Make sure the given Protobuf-library bool return value is true, and fail otherwise with a message.
     /// Reports the virtual offset of the invalid group and/or message

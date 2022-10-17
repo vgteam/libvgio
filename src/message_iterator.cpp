@@ -140,18 +140,19 @@ string MessageIterator::sniff_tag(::google::protobuf::io::ZeroCopyInputStream& s
     return tag;
 }
 
-MessageIterator::MessageIterator(istream& in) : MessageIterator(unique_ptr<BlockedGzipInputStream>(new BlockedGzipInputStream(in))) {
+MessageIterator::MessageIterator(istream& in, bool verbose) : MessageIterator(unique_ptr<BlockedGzipInputStream>(new BlockedGzipInputStream(in)), verbose) {
     // Nothing to do!
 }
 
-MessageIterator::MessageIterator(unique_ptr<BlockedGzipInputStream>&& bgzf) :
+MessageIterator::MessageIterator(unique_ptr<BlockedGzipInputStream>&& bgzf, bool verbose) :
     value(),
     previous_tag(),
     group_count(0),
     group_idx(0),
     group_vo(-1),
     item_vo(-1),
-    bgzip_in(std::move(bgzf))
+    bgzip_in(std::move(bgzf)),
+    verbose(verbose)
 {
     advance();
 }
@@ -195,9 +196,9 @@ auto MessageIterator::operator++() -> const MessageIterator& {
         if (!coded_in.ReadVarint64((::google::protobuf::uint64*) &group_count)) {
             // We didn't get a length
             
-#ifdef debug
-            cerr << "Failed to read group count at " << group_vo << "; stop iteration." << endl;
-#endif
+            if (this->verbose) {
+                cerr << "Failed to read group count at " << group_vo << "; stop iteration." << endl;
+            }
             
             // This is the end of the input stream, switch to state that
             // will match the end constructor
@@ -208,9 +209,9 @@ auto MessageIterator::operator++() -> const MessageIterator& {
             return *this;
         }
         
-#ifdef debug
-        cerr << "Read group count at " << group_vo << ": " << group_count << endl;
-#endif
+        if (this->verbose) {
+            cerr << "Read group count at " << group_vo << ": " << group_count << endl;
+        }
         
         // Now we have to grab the tag, which is pretending to be the first item.
         // It could also be the first item, if it isn't a known tag string.
@@ -234,9 +235,9 @@ auto MessageIterator::operator++() -> const MessageIterator& {
             handle(coded_in.ReadString(&value.first, tag_size), group_vo);
         }
         
-#ifdef debug
-        cerr << "Read what should be the tag of " << tag_size << " bytes" << endl;
-#endif
+        if (this->verbose) {
+            cerr << "Read what should be the tag of " << tag_size << " bytes" << endl;
+        }
         
         // Update the counters for the tag, which the counters treat as a message.
         if (virtual_offset == -1) {
@@ -254,25 +255,25 @@ auto MessageIterator::operator++() -> const MessageIterator& {
         bool is_tag = false;
         
         if (!previous_tag.empty() && previous_tag == value.first) {
-#ifdef debug
-            cerr << "Tag is the same as the last tag of \"" << previous_tag << "\"" << endl;
-#endif
+            if (this->verbose) {
+                cerr << "Tag is the same as the last tag of \"" << previous_tag << "\"" << endl;
+            }
             is_tag = true;
         } else {
-#ifdef debug
-            cerr << "Tag does not match cached previous tag or there is no cached previous tag" << endl;
-#endif
+            if (this->verbose) {
+                cerr << "Tag does not match cached previous tag or there is no cached previous tag" << endl;
+            }
         }
     
         if (!is_tag && Registry::is_valid_tag(value.first)) {
-#ifdef debug
-            cerr << "Tag \"" << value.first << "\" is OK with the registry" << endl;
-#endif
+            if (this->verbose) {
+                cerr << "Tag \"" << value.first << "\" is OK with the registry" << endl;
+            }
             is_tag = true;
         } else if (!is_tag) {
-#ifdef debug
-            cerr << "Tag is not approved by the registry" << endl;
-#endif
+            if (this->verbose) {
+                cerr << "Tag is not approved by the registry" << endl;
+            }
         }
     
         if (!is_tag) {
@@ -282,13 +283,10 @@ auto MessageIterator::operator++() -> const MessageIterator& {
             value.first.clear();
             previous_tag.clear();
             
-#ifdef debug
-            cerr << "Tag is actually a message probably." << endl;
-#endif
-
-#ifdef debug
-            cerr << "Found message with tag \"" << value.first << "\"" << endl;
-#endif
+            if (this->verbose) {
+                cerr << "Tag is actually a message probably." << endl;
+                cerr << "Found message with tag \"" << value.first << "\"" << endl;
+            }
             
             // Return ourselves, after increment
             return *this;
@@ -304,9 +302,9 @@ auto MessageIterator::operator++() -> const MessageIterator& {
             // We want to emit it as a pair of (tag, null).
             // So we consider our increment complete here.
             
-#ifdef debug
-            cerr << "Found message-less tag \"" << value.first << "\"" << endl;
-#endif
+            if (this->verbose) {
+                cerr << "Found message-less tag \"" << value.first << "\"" << endl;
+            }
             
             value.second.reset();
             return *this;
@@ -362,9 +360,9 @@ auto MessageIterator::operator++() -> const MessageIterator& {
     // It may have been moved away.
     value.first = previous_tag;
     
-#ifdef debug
-    cerr << "Found message " << group_idx << " size " << msgSize << " with tag \"" << value.first << "\"" << endl;
-#endif
+    if (this->verbose) {
+        cerr << "Found message " << group_idx << " size " << msgSize << " with tag \"" << value.first << "\"" << endl;
+    }
     
     // Move on to the next message in the group
     group_idx++;
@@ -418,17 +416,17 @@ auto MessageIterator::tell_group() const -> int64_t {
 auto MessageIterator::seek_group(int64_t virtual_offset) -> bool {
     if (virtual_offset < 0) {
         // That's not allowed
-#ifdef debug
-        cerr << "Can't seek to negative position" << endl;
-#endif
+        if (this->verbose) {
+            cerr << "Can't seek to negative position" << endl;
+        }
         return false;
     }
     
     if (group_idx == 0 && group_vo == virtual_offset) {
         // We are there already
-#ifdef debug
-        cerr << "Already at seek position" << endl;
-#endif
+        if (this->verbose) {
+            cerr << "Already at seek position" << endl;
+        }
         return true;
     }
     
@@ -437,9 +435,9 @@ auto MessageIterator::seek_group(int64_t virtual_offset) -> bool {
     
     if (!sought) {
         // We can't seek
-#ifdef debug
-        cerr << "bgzip_in could not seek" << endl;
-#endif
+        if (this->verbose) {
+            cerr << "bgzip_in could not seek" << endl;
+        }
         return false;
     }
     
@@ -447,9 +445,9 @@ auto MessageIterator::seek_group(int64_t virtual_offset) -> bool {
     group_count = 0;
     group_idx = 0;
     
-#ifdef debug
-    cerr << "Successfully sought" << endl;
-#endif
+    if (this->verbose) {
+        cerr << "Successfully sought" << endl;
+    }
     
     // Read it (or detect EOF)
     advance();
