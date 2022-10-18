@@ -19,6 +19,7 @@
  *
  * Version: Jul 28, 2002
  * History:
+ *  Oct 17, 2022: add protection against partial writes
  *  Oct 05, 2020: add stream-wrapping stream and up putback, use unnamespaced void* read/write
  *  Jan 29, 2019: namespace for vg project
  *  Jul 28, 2002: bugfix memcpy() => memmove()
@@ -73,6 +74,7 @@ class fdoutbuf : public std::streambuf {
         if (c != EOF) {
             char z = c;
             if (::write(fd, (void*)&z, 1) != 1) {
+                // TODO: handle EINTR
                 return EOF;
             }
         }
@@ -82,7 +84,21 @@ class fdoutbuf : public std::streambuf {
     virtual
     std::streamsize xsputn (const char* s,
                             std::streamsize num) {
-        return ::write(fd,(void*)s,num);
+        // ::write() will happily write less than asked for and succeed, but if
+        // we write less than asked for, ostream interprets it as us
+        // encountering an error. So we need to protect against partial writes
+        // here. These are encountered in the wild when trying to write more
+        // than about 2 GB at once.
+        std::streamsize total = 0;
+        while (total < num) {
+            ssize_t written = ::write(fd,(void*)(s + total),(num - total));
+            if (written == -1) {
+                // An error was encountered.
+                return total;
+            }
+            total += written;
+        }
+        return total;
     }
 };
 
