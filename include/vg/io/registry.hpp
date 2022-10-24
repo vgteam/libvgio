@@ -49,7 +49,6 @@ using load_function_t = function<void*(const message_sender_function_t&)>;
 
 /// This is the type of a function that can serialize an object of unspecified type to a message consumer.
 using save_function_t = function<void(const void*, const message_consumer_function_t&)>;
-
 /// This is the type of a function that can load an object of unspecified type from a bare input stream.
 using bare_load_function_t = function<void*(istream&)>;
 
@@ -58,6 +57,7 @@ using bare_load_function_with_filename_t = function<void*(istream&, const string
 
 /// This is the type of a function that can save an object of unspecified type to a bare output stream.
 using bare_save_function_t = function<void(const void*, ostream&)>;
+
 
 /**
  * We also have an adapter that takes a function from an istream& to a void*
@@ -174,6 +174,13 @@ public:
     static void register_bare_loader_saver_with_header_check(const string& tag,
         function<bool(istream&)> sniff_header,
         bare_load_function_with_filename_t loader, bare_save_function_t saver);    
+
+    /**
+     * Generalization of register_bare_loader_saver_with_magic that can also take a filename
+     */
+    template<typename Handled, typename... Bases>
+    static void register_bare_loader_saver_with_magic_and_filename(const string& tag, const string& magic,
+        bare_load_function_with_filename_t loader, bare_save_function_t saver);
         
     /**
      * Register a load function for a tag. The empty tag means it can run on
@@ -487,6 +494,20 @@ void Registry::register_bare_loader_saver_with_header_check(const string& tag, f
     // Register the bare stream loader with header check
     register_bare_loader_with_filename<Handled, Bases...>(loader, sniff_header);
 }
+
+template<typename Handled, typename... Bases>
+void Registry::register_bare_loader_saver_with_magic_and_filename(const string& tag, const string& magic,
+    bare_load_function_with_filename_t loader, bare_save_function_t saver) {
+
+    assert(tag.size() <= MAX_TAG_LENGTH);
+
+    register_bare_loader_with_filename<Handled, Bases...>(loader, [magic](istream& in_stream) {
+        return sniff_magic(in_stream, magic);
+    });
+    register_saver<Handled, Bases...>(tag, wrap_bare_saver(saver));
+
+}
+        
 
 template<typename Want>
 const load_function_t* Registry::find_loader(const string& tag) {
