@@ -162,6 +162,12 @@ if (NOT (CMAKE_MAJOR_VERSION EQUAL "3" AND (CMAKE_MINOR_VERSION EQUAL "10" OR CM
     )
 endif()
 
+# Test
+add_executable(test_libvgio test.cpp)
+target_link_libraries(test_libvgio vgio_static)
+set_target_properties(test_libvgio PROPERTIES OUTPUT_NAME "test_libvgio")
+set_target_properties(test_libvgio PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
+
 # Installation instructions
 
 set(INSTALL_CONFIGDIR ${CMAKE_INSTALL_LIBDIR}/cmake/VGio)
