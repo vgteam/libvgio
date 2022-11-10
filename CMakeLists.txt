@@ -165,7 +165,7 @@ endif()
 # Test
 # TODO: This doesn't link on Mac yet due to missing vtables for STL streams
 # that Protobuf wants.
-add_executable(test_libvgio test.cpp EXCLUDE_FROM_ALL)
+add_executable(test_libvgio EXCLUDE_FROM_ALL test.cpp)
 target_link_libraries(test_libvgio vgio_static)
 set_target_properties(test_libvgio PROPERTIES OUTPUT_NAME "test_libvgio")
 set_target_properties(test_libvgio PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
