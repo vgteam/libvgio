@@ -19,6 +19,7 @@
  *
  * Version: Jul 28, 2002
  * History:
+ *  Nov 10, 2022: add protection against secret MacOS write size limit
  *  Oct 17, 2022: add protection against partial writes
  *  Oct 05, 2020: add stream-wrapping stream and up putback, use unnamespaced void* read/write
  *  Jan 29, 2019: namespace for vg project
@@ -91,7 +92,12 @@ class fdoutbuf : public std::streambuf {
         // than about 2 GB at once.
         std::streamsize total = 0;
         while (total < num) {
-            ssize_t written = ::write(fd,(void*)(s + total),(num - total));
+            // We can't write more than INT_MAX (2^31-1) bytes at once on Mac. See
+            // <https://github.com/erlang/otp/issues/6242#issuecomment-1237641854>.
+            // If we try, we don't get a partial write, we instead get EINVAL.
+            // So make sure never to try on any platform.
+            ssize_t to_write = std::min(num - total, (ssize_t) INT_MAX);
+            ssize_t written = ::write(fd,(void*)(s + total),to_write);
             if (written == -1) {
                 // An error was encountered.
                 return total;
