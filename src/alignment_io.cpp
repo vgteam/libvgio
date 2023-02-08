@@ -534,16 +534,6 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
             gaf.opt_fields["bq"] = make_pair("Z", string_quality_short_to_char(aln.quality()));
         }
 
-        // optional frag_next/prev names
-        if (frag_links == true) {
-            if (aln.has_fragment_next()) {
-                gaf.opt_fields["fn"] = make_pair("Z", aln.fragment_next().name());
-            }
-            if (aln.has_fragment_prev()) {
-                gaf.opt_fields["fp"] = make_pair("Z", aln.fragment_prev().name());
-            }
-        }
-
         if (aln.has_annotation()) {
             auto& annotation = aln.annotation();
             if (annotation.fields().count("proper_pair")) {
@@ -554,6 +544,16 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
                 gaf.opt_fields["AD"] = make_pair("i", (annotation.fields().at("support")).string_value());
             }
         }
+    }
+
+    // optional frag_next/prev names
+    if (frag_links == true) {
+      if (aln.has_fragment_next()) {
+        gaf.opt_fields["fn"] = make_pair("Z", aln.fragment_next().name());
+      }
+      if (aln.has_fragment_prev()) {
+        gaf.opt_fields["fp"] = make_pair("Z", aln.fragment_prev().name());
+      }
     }
 
     return gaf;    
