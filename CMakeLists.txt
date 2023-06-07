@@ -88,6 +88,13 @@ protobuf_generate(
     IMPORT_DIRS "deps/"
     OUT_VAR PROTO_SRCS
 )
+# Find just the headers to install
+foreach (FILENAME ${PROTO_SRCS})
+    string(REGEX MATCH ".*\.h$" HEADER ${FILENAME})
+    if (HEADER)
+        list(APPEND PROTO_HDRS ${HEADER})
+    endif()
+endforeach()
 
 # The Protobuf compiler dumps the vg.pb.h file in the root directory.
 # But we need to have it in somewhere accessible as <vg/vg.pb.h>
