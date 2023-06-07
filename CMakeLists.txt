@@ -16,19 +16,53 @@ message("Building libvgio for C++ ${CMAKE_CXX_STANDARD}")
 # Declare dependencies and explain how to find them
 find_package(PkgConfig REQUIRED)
 
+# On Mac, Homebrew ships a CMake with a FindProtobuf.cmake that can't get all
+# the dependencies fro the Protobuf it ships.
+# But luckily Homebrew also ships the Protobuf project's CMake config.
 # Since Protobuf depends on Abseil, and CMake hasn't yet updated FindProtobuf
 # to expose this dependency, we need to sniff out Protobuf using its own
 # installed CMake config and not CMake's finder.
-# But first we tell that to be a bit more finder-compatible
-set(protobuf_MODULE_COMPATIBLE ON)
-find_package(Protobuf REQUIRED CONFIG)
+find_package(Protobuf CONFIG)
 
-# The compatible mode is supposed to set Protobuf_LIBRARIES, but doesn't.
-# INTERFACE_LINK_LIBRARIES on protobuf::libprotobuf is full of targets and not actual lib files.
-# Also the targets are only SHARED and not STATIC, as installed by Homebrew.
+if (Protobuf_FOUND)
+    message("Found Protobuf using its own protobuf-config.cmake")
+    # The compatible mode is supposed to set Protobuf_LIBRARIES, but doesn't, so we don't use it.
+    # INTERFACE_LINK_LIBRARIES on protobuf::libprotobuf is full of targets and not actual lib files.
+    # Also the targets are only SHARED and not STATIC, as installed by Homebrew.
 
-# Instead of protobuf_generate_cpp which FindProtobuf makes, Protobuf itself
-# makes a different and incompatible protobuf_generate function.
+    # Instead of protobuf_generate_cpp which FindProtobuf makes, Protobuf itself
+    # makes a different and incompatible protobuf_generate function.
+
+    # Make Protobuf headers and code.
+    # See <https://github.com/protocolbuffers/protobuf/blob/d800c5f08b184d261e6c47662035d554f109eb3b/docs/cmake_protobuf_generate.md>
+    protobuf_generate(
+        LANGUAGE cpp
+        PROTOS "deps/vg.proto"
+        IMPORT_DIRS "deps/"
+        OUT_VAR PROTO_SRCS
+    )
+    # Find just the headers to install
+    foreach (FILENAME ${PROTO_SRCS})
+        string(REGEX MATCH ".*\.h$" HEADER ${FILENAME})
+        if (HEADER)
+            list(APPEND PROTO_HDRS ${HEADER})
+        endif()
+    endforeach()
+else()
+    message("No installed Protobuf has registered itself with CMake.")
+
+    # Fall back to FindProtobuf.cmake and hope it is a version that works with the installed Protobuf
+    find_package(Protobuf REQUIRED)
+
+    message("Found Protobuf using FindProtobuf.cmake")
+
+    # Generate the code using the FindProtobuf.cmake function
+    protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS "deps/vg.proto")
+endif()
+
+
+
+
 
 # Find threads
 set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -79,22 +113,6 @@ endif()
 # Only takes effect after installation
 include(GNUInstallDirs)
 set(CMAKE_INSTALL_NAME_DIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
-
-# Make Protobuf headers and code.
-# See <https://github.com/protocolbuffers/protobuf/blob/d800c5f08b184d261e6c47662035d554f109eb3b/docs/cmake_protobuf_generate.md>
-protobuf_generate(
-    LANGUAGE cpp
-    PROTOS "deps/vg.proto"
-    IMPORT_DIRS "deps/"
-    OUT_VAR PROTO_SRCS
-)
-# Find just the headers to install
-foreach (FILENAME ${PROTO_SRCS})
-    string(REGEX MATCH ".*\.h$" HEADER ${FILENAME})
-    if (HEADER)
-        list(APPEND PROTO_HDRS ${HEADER})
-    endif()
-endforeach()
 
 # The Protobuf compiler dumps the vg.pb.h file in the root directory.
 # But we need to have it in somewhere accessible as <vg/vg.pb.h>
