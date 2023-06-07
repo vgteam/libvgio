@@ -3,32 +3,32 @@ project(libvgio VERSION 0.0.0 LANGUAGES CXX)
 
 # Optimize by default, but also include debug info
 set(CMAKE_CXX_FLAGS "-O3 -g ${CMAKE_CXX_FLAGS}")
+# Don't allow any -std= flags in
+string(REGEX REPLACE " *-std=[^ ]*" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
 find_package(OpenMP REQUIRED)
 
-# Use C++14, so that Protobuf headers that use lambdas will work.
-set(CMAKE_CXX_STANDARD 14)
+if (NOT DEFINED CMAKE_CXX_STANDARD)
+    # Use C++14, so that Protobuf headers that use lambdas will work.
+    set(CMAKE_CXX_STANDARD 14)
+endif()
+message("Building libvgio for C++ ${CMAKE_CXX_STANDARD}")
 
 # Declare dependencies and explain how to find them
 find_package(PkgConfig REQUIRED)
 
-# We need to find Protobuf normally to get the protobuf_generate_cpp command.
-# We can only get one version of the libraries this way (static or dynamic). We
-# used to also look with pkg_config to find both versions, but that allows us
-# to choose two different Protobufs with the different methods, which causes
-# Problems.
-# No amount of unsetting variables seems to let us invoke this twice to get
-# different flavors, and we don't really want to fork FindProtobuf.cmake. So we
-# find the dynamic library and assume the static library is a .a next to it.
-set(Protobuf_USE_STATIC_LIBS OFF)
-# To investigate why we pick the Protobuf we do, do this:
-set(Protobuf_DEBUG ON)
-find_package(Protobuf REQUIRED)
-string(REGEX REPLACE "(\\.so|\\.dylib)$" ".a" Protobuf_STATIC_LIBRARIES "${Protobuf_LIBRARIES}")
-message("Protobuf will be ${Protobuf_LIBRARIES} for PIC dynamic code and ${Protobuf_STATIC_LIBRARIES} for non-PIC static code")
-# TODO: This is *supposed* to define a protobuf::libprotobuf target, but it doesn't.
-# Just use old-style ${Protobuf_INCLUDE_DIRS} and ${Protobuf_LIBRARIES}
-# instead. Also, with the targets we probably can't redo find_package.
+# Since Protobuf depends on Abseil, and CMake hasn't yet updated FindProtobuf
+# to expose this dependency, we need to sniff out Protobuf using its own
+# installed CMake config and not CMake's finder.
+# But first we tell that to be a bit more finder-compatible
+set(protobuf_MODULE_COMPATIBLE ON)
+find_package(Protobuf REQUIRED CONFIG)
 
+# The compatible mode is supposed to set Protobuf_LIBRARIES, but doesn't.
+# INTERFACE_LINK_LIBRARIES on protobuf::libprotobuf is full of targets and not actual lib files.
+# Also the targets are only SHARED and not STATIC, as installed by Homebrew.
+
+# Instead of protobuf_generate_cpp which FindProtobuf makes, Protobuf itself
+# makes a different and incompatible protobuf_generate function.
 
 # Find threads
 set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -80,8 +80,14 @@ endif()
 include(GNUInstallDirs)
 set(CMAKE_INSTALL_NAME_DIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
 
-# Make Protobuf headers and code
-protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS "deps/vg.proto")
+# Make Protobuf headers and code.
+# See <https://github.com/protocolbuffers/protobuf/blob/d800c5f08b184d261e6c47662035d554f109eb3b/docs/cmake_protobuf_generate.md>
+protobuf_generate(
+    LANGUAGE cpp
+    PROTOS "deps/vg.proto"
+    IMPORT_DIRS "deps/"
+    OUT_VAR PROTO_SRCS
+)
 
 # The Protobuf compiler dumps the vg.pb.h file in the root directory.
 # But we need to have it in somewhere accessible as <vg/vg.pb.h>
@@ -117,7 +123,6 @@ target_include_directories(vgio
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}> # Capture the Protobuf generated header that lands here.
         ${HTSlib_INCLUDEDIR}
-        ${Protobuf_INCLUDE_DIRS}
         ${Jansson_INCLUDEDIR}
         $<BUILD_INTERFACE:${handlegraph_INCLUDE}>
     PRIVATE
@@ -129,26 +134,25 @@ target_include_directories(vgio_static
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}> # Capture the Protobuf generated header that lands here.
         ${HTSlib_INCLUDEDIR}
-        ${Protobuf_INCLUDE_DIRS}
         ${Jansson_INCLUDEDIR}
         $<BUILD_INTERFACE:${handlegraph_INCLUDE}>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-target_compile_features(vgio PUBLIC cxx_std_14)
-target_compile_features(vgio_static PUBLIC cxx_std_14)
+target_compile_features(vgio PUBLIC cxx_std_${CMAKE_CXX_STANDARD})
+target_compile_features(vgio_static PUBLIC cxx_std_${CMAKE_CXX_STANDARD})
 
 # We need to repeat these linking rules for both shared and static because they don't propagate from the object library.
 # But we need to carry through transitive library dependencies in static mode.
 # Also note that target_link_directories needs cmake 3.13+
 target_link_libraries(vgio
     PUBLIC
-        ${Protobuf_LIBRARIES} Threads::Threads ${HTSlib_LIBRARIES} ${Jansson_LIBRARIES} ${handlegraph_LIB}/libhandlegraph${CMAKE_SHARED_LIBRARY_SUFFIX} ${PLATFORM_EXTRA_LIB_FLAGS} OpenMP::OpenMP_CXX
+        protobuf::libprotobuf Threads::Threads ${HTSlib_LIBRARIES} ${Jansson_LIBRARIES} ${handlegraph_LIB}/libhandlegraph${CMAKE_SHARED_LIBRARY_SUFFIX} ${PLATFORM_EXTRA_LIB_FLAGS} OpenMP::OpenMP_CXX
 )
 target_link_libraries(vgio_static
     PUBLIC
-        ${Protobuf_STATIC_LIBRARIES} Threads::Threads ${HTSlib_STATIC_LIBRARIES} ${Jansson_LIBRARIES} ${handlegraph_LIB}/libhandlegraph${CMAKE_STATIC_LIBRARY_SUFFIX} ${PLATFORM_EXTRA_LIB_FLAGS} OpenMP::OpenMP_CXX
+        protobuf::libprotobuf Threads::Threads ${HTSlib_STATIC_LIBRARIES} ${Jansson_LIBRARIES} ${handlegraph_LIB}/libhandlegraph${CMAKE_STATIC_LIBRARY_SUFFIX} ${PLATFORM_EXTRA_LIB_FLAGS} OpenMP::OpenMP_CXX
 )
 
 if (NOT (CMAKE_MAJOR_VERSION EQUAL "3" AND (CMAKE_MINOR_VERSION EQUAL "10" OR CMAKE_MINOR_VERSION EQUAL "11")))
