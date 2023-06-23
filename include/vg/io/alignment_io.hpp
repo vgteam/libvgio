@@ -73,8 +73,9 @@ size_t gaf_paired_interleaved_for_each_parallel_after_wait(const HandleGraph& gr
                                                            uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
 // gaf conversion
 
-/// Convert an alignment to GAF. THe alignment must be in node ID space.
+/// Convert an alignment to GAF. The alignment must be in node ID space.
 /// If translate_through is set, output will be in segment name space.
+// If cs_cigar is true, will store a CIGAR string in the cs tag in the GAF.
 gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
                                      function<string(nid_t, bool)> node_to_sequence,
                                      const Alignment& aln,
@@ -82,8 +83,9 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
                                      bool cs_cigar = true,
                                      bool base_quals = true,
                                      bool frag_links = true);
-/// Convert an alignment to GAF. THe alignment must be in node ID space.
+/// Convert an alignment to GAF. The alignment must be in node ID space.
 /// If translate_through is set, output will be in segment name space.
+// If cs_cigar is true, will store a CIGAR string in the cs tag in the GAF.
 gafkluge::GafRecord alignment_to_gaf(const HandleGraph& graph,
                                      const Alignment& aln,
                                      const handlegraph::NamedNodeBackTranslation* translate_through = nullptr,
