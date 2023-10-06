@@ -6,6 +6,8 @@
 #include <regex>
 #include <cmath>
 
+//#define debug_translation
+
 namespace vg {
 
 namespace io {
@@ -234,13 +236,16 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
         gaf.path.reserve(aln.path().mapping_size());
         string cs_cigar_str;
         size_t running_match_length = 0;
-        bool running_deletion = false; // if set, can just print bases (without "-") to continue
+        // Track running deletion status for CIGAR string.
+        // if set, can just print bases (without "-") to continue
+        bool running_deletion = false;
         size_t total_to_len = 0;
         size_t prev_offset;
         handlegraph::oriented_node_range_t prev_range;
-        for (size_t i = 0; i < aln.path().mapping_size(); ++i) {
-            auto& mapping = aln.path().mapping(i);
+        for (size_t mapping_index = 0; mapping_index < aln.path().mapping_size(); ++mapping_index) {
+            auto& mapping = aln.path().mapping(mapping_index);
             const Position& position = mapping.position();
+            // This stores the offset along the current node that we arrived at. 
             size_t start_offset_on_node = position.offset();
             // This is our offset along the graph node, and is advanced as a
             // cursor as we look at the edits.
@@ -251,9 +256,14 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
             string node_seq;
             bool skip_step = false;
 
-            if (i > 0 && cs_cigar == true && start_offset_on_node > 0) {
-                if (start_offset_on_node == prev_offset && position.node_id() == aln.path().mapping(i -1).position().node_id() &&
-                    position.is_reverse() == aln.path().mapping(i -1).position().is_reverse()) {
+#ifdef debug_translation
+            std::cerr << "At node " << position.node_id() << " and starting at offset " << offset << std::endl;
+#endif
+
+            if (cs_cigar == true && mapping_index > 0 && start_offset_on_node > 0) {
+                // We need to do something in the CIGAR about how we skipped the start of a node we arrived at.
+                if (start_offset_on_node == prev_offset && position.node_id() == aln.path().mapping(mapping_index -1).position().node_id() &&
+                    position.is_reverse() == aln.path().mapping(mapping_index -1).position().is_reverse()) {
                     // our mapping is redundant, we won't write a step for it
                     skip_step = true;
                 } else {
@@ -271,7 +281,7 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
                     // so we try to keep that in mind here where we subtract out the previous offset
                     // before deleting to not double count
                     int64_t del_start_offset = 0;
-                    if (position.node_id() == aln.path().mapping(i - 1).position().node_id()) {
+                    if (position.node_id() == aln.path().mapping(mapping_index - 1).position().node_id()) {
                         del_start_offset = prev_offset;
                     }
                     if (start_offset_on_node > del_start_offset) {
@@ -291,8 +301,12 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
             
             for (size_t j = 0; j < mapping.edit_size(); ++j) {
                 // Scan the edits and work out how much we span on the node.
+#ifdef debug_translation
+                std::cerr << "At edit " << j << std::endl;
+#endif
                 auto& edit = mapping.edit(j);
                 if (edit_is_match(edit)) {
+                    // Count the matches towards the GAF's total match count
                     gaf.matches += edit.from_length();
                 }
                 if (cs_cigar == true) {
@@ -336,6 +350,9 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
                 }
                 offset += edit.from_length();
                 total_to_len += edit.to_length();
+#ifdef debug_translation
+                std::cerr << "Move offset by edit from length of " << edit.from_length() << " to " << offset << std::endl;
+#endif
             }
 
             // Determine the range on a node we are aligned against
@@ -364,29 +381,45 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
                     throw std::runtime_error("Translated range on node " + std::to_string(std::get<0>(range)) +
                                              " ended up on the opposite strand; complex translations like this are not yet implemented");
                 }
-                
+
                 // Record how far ahead the node is of the segment
                 node_to_segment_offset = get<2>(translated_range) - get<2>(range);
+
+#ifdef debug_translation
+                std::cerr << "Translated range node:" << get<0>(range) << " orientation:" << get<1>(range) << " start:" << get<2>(range) << " length:" << get<3>(range)
+                    << " to segment:" << get<0>(translated_range) << " orientation:" << get<1>(translated_range) << " start:" << get<2>(translated_range) << " length:" << get<3>(translated_range) 
+                    << " leaving node to segment offset of " << node_to_segment_offset << std::endl;
+#endif
+
                 // Commit back the translation
                 range = translated_range;
             }
 
-            if (i == 0) {
+            if (mapping_index == 0) {
                 // use path_start to store the offset of the first node
                 gaf.path_start = std::get<2>(range);
                 
+#ifdef debug_translation
+                std::cerr << "This is the first mapping so we start the alignment at " << gaf.path_start << " on path" << std::endl;
+#endif
+            } else if (mapping_index + 1 == aln.path().mapping_size() && mapping_index > 0 && aln.path().mapping(mapping_index).edit_size() == 1 &&
+                       edit_is_insertion(aln.path().mapping(mapping_index).edit(0))) {
                 // this is another case that comes up, giraffe adds an empty mapping for a softclip at the
                 // end.  there's no real way for the GAF cigar to distinguish these, so make sure it doesn't come up
-            } else if (i + 1 == aln.path().mapping_size() && i > 0 && aln.path().mapping(i).edit_size() == 1 &&
-                       edit_is_insertion(aln.path().mapping(i).edit(0))) {
+#ifdef debug_translation
+                std::cerr << "This is a final softclip-only mapping, so hide it." << gaf.path_start << std::endl;
+#endif
                 skip_step = true;
             }
 
-            if (i < aln.path().mapping_size() - 1 && offset != node_length) {
+            if (mapping_index < aln.path().mapping_size() - 1 && offset != node_length) {
                 // We aren't the last mapping but we are ending before our node is done
-                if (position.node_id() != aln.path().mapping(i + 1).position().node_id() ||
-                    position.is_reverse() != aln.path().mapping(i + 1).position().is_reverse()) {
+                if (position.node_id() != aln.path().mapping(mapping_index + 1).position().node_id() ||
+                    position.is_reverse() != aln.path().mapping(mapping_index + 1).position().is_reverse()) {
                     // we are hopping off the middle of a node, need to gobble it up with a deletion
+#ifdef debug_translation
+                    std::cerr << "Alignment leaves before reaching end of node" << std::endl;
+#endif
                     if (translate_through) {
                         // We can't do this if we don't have a way to get segment lengths, and that's not in the interface yet.
                         throw std::runtime_error("Split alignments cannot be converted to named-segment-space GAF");
@@ -408,6 +441,9 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
                     // we have a duplicate node mapping.  vg map actually produces these sometimes
                     // where an insert gets its own mapping even though its from_length is 0
                     // the gaf cigar format assumes nodes are fully covered, so we squish it out.
+#ifdef debug_translation
+                    std::cerr << "Alignment has another mapping to this node after this one, so skip this one" << std::endl;
+#endif
                     skip_step = true;
                 }
             }
@@ -415,14 +451,23 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
             //6 string Path matching /([><][^\s><]+(:\d+-\d+)?)+|([^\s><]+)/
             if (!skip_step) {
                 gaf.path_length += node_length;
+#ifdef debug_translation
+                std::cerr << "Add full node length of " << node_length << " to GAF path" << std::endl;
+#endif
                 
                 // Now we consult range for things like the offset
-                if (i == 0) {
+                if (mapping_index == 0) {
                     // Update the stored path start.
                     // TODO: didn't we do this already?
                     gaf.path_start = std::get<2>(range);
+#ifdef debug_translation
+                    std::cerr << "This is the first mapping so start alignment at " << std::get<2>(range) << " on path (again)" << std::endl;
+#endif
                     // Account for any part of the path in the segment before our first node
                     gaf.path_length += node_to_segment_offset;
+#ifdef debug_translation
+                    std::cerr << "This is the first mapping so also add unused prefix of its segment (" << node_to_segment_offset << ")" << std::endl;
+#endif
                 } else if (translate_through) {
                     // We need to filter out consecutive visits to pieces of
                     // the same segment that abut each other, so we don't get
@@ -435,9 +480,15 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
                     if (std::get<0>(range) == std::get<0>(prev_range) &&
                         std::get<1>(range) == std::get<1>(prev_range)) {
                         // We're on the same segment and orientation as the last mapping
+#ifdef debug_translation
+                        std::cerr << "We're on the same segment and orientation as the previous mapping" << std::endl;
+#endif
                         if (std::get<2>(range) == std::get<2>(prev_range) + std::get<3>(prev_range)) {
                             // And we abut perfectly; nothing has been skipped over.
                             // We don't need to report the segment again in the GAF path.
+#ifdef debug_translation
+                            std::cerr << "And we abut perfectly, so skip the step." << std::endl;
+#endif
                             skip_step = true;
                         } else if (std::get<2>(range) != 0) {
                             // We're arriving at the same segment at somewhere
@@ -445,11 +496,15 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
                             // alignment in segment space! We can't handle
                             // those yet!
                             throw std::runtime_error("Alignments that become split in segment space cannot be converted to named-segment-space GAF");
+                        } else {
+                            // Otherwise we're arriving at the start of the same
+                            // segment. Still might be a split alignment that we
+                            // forbid, but if not we do want to report the same
+                            // segment again because we go through it again.
+#ifdef debug_translation
+                            std::cerr << "We're repeating the segment" << std::endl;
+#endif
                         }
-                        // Otherwise we're arriving at the start of the same
-                        // segment. Still might be a split alignment that we
-                        // forbid, but if not we do want to report the same
-                        // segment again because we go through it again.
                     }
                 }
                 
@@ -462,23 +517,38 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
                     step.is_interval = false;
                     
                     gaf.path.push_back(std::move(step));
+#ifdef debug_translation
+                    std::cerr << "Added step to GAF path" << std::endl;
+#endif
                 }
             }
             
-            if (i == aln.path().mapping_size()-1) {
+            if (mapping_index == aln.path().mapping_size()-1) {
+#ifdef debug_translation
+                std::cerr << "We are the final mapping" << std::endl;
+#endif
+
                 //9 int End position on the path (0-based)
-                gaf.path_end = gaf.path_start;
-                // What's the offset cursor we're at on the segment, if
-                // different from where we are on the node?
-                size_t offset_on_path_visit = offset + node_to_segment_offset;
-                if (gaf.path_length > offset_on_path_visit) {
-                    assert(!gafkluge::is_missing(gaf.path_start));
-                    // path_length - 1 marks the last position of our path.  we subtract out
-                    // the regions between offset and here to get the end
-                    gaf.path_end = gaf.path_length - 1 - (node_length - offset_on_path_visit);
-                }
+
+#ifdef debug_translation
+                std::cerr << "Path is overall " << gaf.path_length << std::endl;
+#endif
+
+                assert(!gafkluge::is_missing(gaf.path_start));
+
+                // Right now the path length includes all the stuff on the
+                // start segment before we actually pick up, and all the
+                // graph nodes we visit (even if we don't use the full
+                // node), but not any of the last segment after the last
+                // node we use.
+                size_t unused_node = node_length - offset;
+                gaf.path_end = gaf.path_length - unused_node;
+#ifdef debug_translation
+                std::cerr << "There are " << unused_node << " bases on the last node in the path not used by the alignment, so the alignment ends at " << gaf.path_end << std::endl;
+#endif
+
                 if (translate_through) {
-                    // But we also have to account int he path length for the part
+                    // But we also have to account in the path length for the part
                     // of the segment that comes after the node we stop at. So
                     // translate offset 0 on its reverse strand to measure the
                     // offset from there to the segment end.
@@ -490,6 +560,9 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
                     std::vector<handlegraph::oriented_node_range_t> translated = translate_through->translate_back(stop_pos_rev_strand);
                     // Add any offset to the path length.
                     gaf.path_length += std::get<2>(translated.at(0));
+#ifdef debug_translation
+                    std::cerr << "Path is actually " << gaf.path_length << " because we need to add the remaining " << std::get<2>(translated.at(0)) << " bases on the segment after the node" << std::endl;
+#endif
                 }
             }
 
@@ -507,7 +580,8 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
             gaf.query_end = total_to_len;
         } 
 
-        //11 int Alignment block length
+        //11 int Alignment "block length"
+        // This is actually longest sequence in the alignment.
         gaf.block_length = std::max(gaf.path_end - gaf.path_start, gaf.query_length);
 
         // optional cs-cigar string
