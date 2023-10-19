@@ -11,7 +11,7 @@
 #include "htslib/vcf.h"
 #include <handlegraph/handle_graph.hpp>
 #include <handlegraph/named_node_back_translation.hpp>
-#include "vg/io/gafkluge.hpp"
+#include "gafkluge.hpp"
 
 namespace vg {
 

@@ -17,8 +17,8 @@
 #include <htslib/sam.h>
 
 #include <vg/vg.pb.h>
-#include <vg/io/protobuf_emitter.hpp>
-#include <vg/io/stream_multiplexer.hpp>
+#include "protobuf_emitter.hpp"
+#include "stream_multiplexer.hpp"
 #include <handlegraph/handle_graph.hpp>
 #include <handlegraph/named_node_back_translation.hpp>
 
