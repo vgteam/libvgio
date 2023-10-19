@@ -1,7 +1,7 @@
 #ifndef VG_IO_EDIT_HPP_INCLUDED
 #define VG_IO_EDIT_HPP_INCLUDED
 
-#include <vg/vg.pb.h>
+#include "vg/vg.pb.h"
 #include <utility>
 
 namespace vg {

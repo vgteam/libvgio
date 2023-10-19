@@ -16,7 +16,7 @@
 #include <htslib/hts.h>
 #include <htslib/sam.h>
 
-#include <vg/vg.pb.h>
+#include "vg/vg.pb.h"
 #include "protobuf_emitter.hpp"
 #include "stream_multiplexer.hpp"
 #include <handlegraph/handle_graph.hpp>

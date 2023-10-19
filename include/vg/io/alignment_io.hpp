@@ -4,7 +4,7 @@
 #include <iostream>
 #include <functional>
 #include <zlib.h>
-#include <vg/vg.pb.h>
+#include "vg/vg.pb.h"
 #include "htslib/hfile.h"
 #include "htslib/hts.h"
 #include "htslib/sam.h"
