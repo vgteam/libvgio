@@ -21,6 +21,18 @@ by running the installation script: `./install.sh [INSTALL_LOCATION]`.
 This will install the dynamic library and headers in your home directory unless
 you provide the script with the optional `INSTALL_LOCATION`.
 
+On Mac, you may need to explain how to find OpenMP, and you may not be able to
+use the script. You can install manually instead. For example, if you installed
+OpenMP via Homebrew, it ought to be in `${HOMEBREW_PREFIX}/opt/libomp`, so you
+can run:
+
+```
+cd build
+cmake -DCMAKE_INSTALL_PREFIX=${HOME} -DCMAKE_PREFIX_PATH="${HOMEBREW_PREFIX}/opt/libomp" ..
+make
+make install
+```
+
 ## Usage
 
 libvgio exposes two header files `vg/vg.pb.h` and
