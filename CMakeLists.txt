@@ -87,16 +87,16 @@ pkg_check_modules(HTSlib REQUIRED htslib)
 # Find Jansson
 pkg_check_modules(Jansson REQUIRED jansson)
 
-# Add external projects
-include(${CMAKE_ROOT}/Modules/ExternalProject.cmake)
-
-# libhandlegraph (full build using its cmake config)
-ExternalProject_Add(handlegraph
-  SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/libhandlegraph"
-  CMAKE_ARGS "${CMAKE_ARGS};-DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>")
-ExternalProject_Get_property(handlegraph INSTALL_DIR)
-set(handlegraph_INCLUDE "${INSTALL_DIR}/include")
-set(handlegraph_LIB "${INSTALL_DIR}/lib")
+# Find or build libhandlegraph
+find_package(libhandlegraph)
+if (${libhandlegraph_FOUND})
+    message("Using installed libhandlegraph")
+else()
+    message("Using bundled libhandlegraph")
+    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/deps/libhandlegraph")
+    add_library(libhandlegraph::handlegraph_shared ALIAS handlegraph_shared)
+    add_library(libhandlegraph::handlegraph_static ALIAS handlegraph_static)
+endif()
 
 if (CMAKE_MAJOR_VERSION EQUAL "3" AND (CMAKE_MINOR_VERSION EQUAL "10" OR CMAKE_MINOR_VERSION EQUAL "11"))
     # Set link directories. We can't yet use target_link_directories to keep
@@ -135,8 +135,6 @@ set_property(TARGET vgio_static PROPERTY POSITION_INDEPENDENT_CODE OFF)
 # Don't build any object files until the Protobuf include symlink is set up and handlegraph is built
 add_dependencies(vgio link_target)
 add_dependencies(vgio_static link_target)
-add_dependencies(vgio handlegraph)
-add_dependencies(vgio_static handlegraph)
 
 # Add an alias so that library can be used inside the build tree, e.g. when testing
 add_library(VGio::vgio ALIAS vgio)
@@ -149,7 +147,6 @@ target_include_directories(vgio
         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}> # Capture the Protobuf generated header that lands here.
         ${HTSlib_INCLUDEDIR}
         ${Jansson_INCLUDEDIR}
-        $<BUILD_INTERFACE:${handlegraph_INCLUDE}>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
@@ -160,7 +157,6 @@ target_include_directories(vgio_static
         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}> # Capture the Protobuf generated header that lands here.
         ${HTSlib_INCLUDEDIR}
         ${Jansson_INCLUDEDIR}
-        $<BUILD_INTERFACE:${handlegraph_INCLUDE}>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
@@ -173,11 +169,11 @@ target_compile_features(vgio_static PUBLIC cxx_std_${CMAKE_CXX_STANDARD})
 # Also note that target_link_directories needs cmake 3.13+
 target_link_libraries(vgio
     PUBLIC
-        protobuf::libprotobuf Threads::Threads ${HTSlib_LIBRARIES} ${Jansson_LIBRARIES} ${handlegraph_LIB}/libhandlegraph${CMAKE_SHARED_LIBRARY_SUFFIX} ${PLATFORM_EXTRA_LIB_FLAGS} OpenMP::OpenMP_CXX
+        protobuf::libprotobuf Threads::Threads ${HTSlib_LIBRARIES} ${Jansson_LIBRARIES} libhandlegraph::handlegraph_shared ${PLATFORM_EXTRA_LIB_FLAGS} OpenMP::OpenMP_CXX
 )
 target_link_libraries(vgio_static
     PUBLIC
-        protobuf::libprotobuf Threads::Threads ${HTSlib_STATIC_LIBRARIES} ${Jansson_LIBRARIES} ${handlegraph_LIB}/libhandlegraph${CMAKE_STATIC_LIBRARY_SUFFIX} ${PLATFORM_EXTRA_LIB_FLAGS} OpenMP::OpenMP_CXX
+        protobuf::libprotobuf Threads::Threads ${HTSlib_STATIC_LIBRARIES} ${Jansson_LIBRARIES} libhandlegraph::handlegraph_static ${PLATFORM_EXTRA_LIB_FLAGS} OpenMP::OpenMP_CXX
 )
 
 if (NOT (CMAKE_MAJOR_VERSION EQUAL "3" AND (CMAKE_MINOR_VERSION EQUAL "10" OR CMAKE_MINOR_VERSION EQUAL "11")))
