@@ -5,10 +5,10 @@
 #include <functional>
 #include <zlib.h>
 #include "vg/vg.pb.h"
-#include "htslib/hfile.h"
-#include "htslib/hts.h"
-#include "htslib/sam.h"
-#include "htslib/vcf.h"
+#include <htslib/hfile.h>
+#include <htslib/hts.h>
+#include <htslib/sam.h>
+#include <htslib/vcf.h>
 #include <handlegraph/handle_graph.hpp>
 #include <handlegraph/named_node_back_translation.hpp>
 #include "gafkluge.hpp"
