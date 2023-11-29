@@ -261,6 +261,10 @@ bool BlockedGzipInputStream::IsBGZF() const {
     return handle->is_compressed && !handle->is_gzip;
 }
 
+bool BlockedGzipInputStream::EnableMultiThreading(size_t thread_count) {
+    return bgzf_mt(handle, thread_count, 256) == 0;
+}
+
 bool BlockedGzipInputStream::SmellsLikeGzip(std::istream& in) {
     // TODO: We also assume that we can sniff the magic number bytes
     // from the input stream and then put them both back. The C spec
