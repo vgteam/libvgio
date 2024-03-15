@@ -221,11 +221,9 @@ auto ProtobufIterator<T>::fill_value() -> void {
         // TODO: Do this in a way where we can check this only per-group!
         if (!Registry::check_protobuf_tag<T>(tag)) {
             // The registry doesn't think this tag is legit for what we are parsing.
-            // Abort!
-            throw runtime_error("[io::ProtobufIterator] tag \"" + tag +
-                "\" for Protobuf that should be \"" + Registry::get_protobuf_tag<T>() + "\"");
-                
-            // TODO: Skip over these instead of aborting to allow for multiplexing (i.e. VG in with XG)
+            // Skip over it.
+            message_it.advance();
+            continue;
         }
         
         if (message.get() == nullptr) {
