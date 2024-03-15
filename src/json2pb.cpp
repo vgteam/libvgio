@@ -21,7 +21,7 @@
 #include <google/protobuf/util/json_util.h>
 #include <google/protobuf/struct.pb.h>
 
-#include <vg/io/json2pb.h>
+#include "vg/io/json2pb.h"
 
 #include <stdexcept>
 #include <cstdio>

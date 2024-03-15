@@ -7,8 +7,8 @@
 #include "vg/io/alignment_emitter.hpp"
 #include "vg/io/alignment_io.hpp"
 #include "vg/io/json2pb.h"
-#include <vg/io/hfile_cppstream.hpp>
-#include <vg/io/stream.hpp>
+#include "vg/io/hfile_cppstream.hpp"
+#include "vg/io/stream.hpp"
 #include <omp.h>
 
 #include <sstream>

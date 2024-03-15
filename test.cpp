@@ -1,7 +1,7 @@
 #include <iostream>
 #include <string>
 
-#include <vg/vg.pb.h>
+#include "vg/vg.pb.h"
 #include <google/protobuf/descriptor.h>
 
 int main (int arcg, char** argv) {
