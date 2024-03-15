@@ -21,6 +21,10 @@ namespace io {
 
 using namespace std;
 
+void AlignmentEmitter::emit_extra_message(const std::string& tag, std::string&& data) {
+    // Just throw away extra tagged data by default
+}
+
 // Implement all the single-read methods in terms of one-read batches
 void AlignmentEmitter::emit_single(Alignment&& aln) {
     vector<Alignment> batch = { aln };
@@ -196,6 +200,38 @@ VGAlignmentEmitter::~VGAlignmentEmitter() {
 #ifdef debug
     cerr << "Destroyed VGAlignmentEmitter" << endl;
 #endif
+}
+
+void VGAlignmentEmitter::emit_extra_message(const std::string& tag, std::string&& data) {
+    if (!proto.empty()) {
+        // We are using Protobuf as the output format so we can hide this message in here under our thread.
+        size_t thread_number = omp_get_thread_num();
+        
+#ifdef debug
+        #pragma omp critical (cerr)
+        cerr << "VGAlignmentEmitter emitting extra " << tag << " message in thread " << thread_number << endl;
+#endif
+        
+        
+        // Flush the Protobuf emitter
+        proto[thread_number]->flush();
+        {
+            // Sneakily make a compressed message emitter on the same stream
+            vg::io::MessageEmitter emitter(multiplexer.get_thread_stream(thread_number), true);
+            // Move the data into it
+            emitter.write(tag, std::move(data));
+        }
+        // And make sure it is done existing
+        
+        if (multiplexer.want_breakpoint(thread_number)) {
+            // The multiplexer wants our data.
+            // We can just break here.
+            multiplexer.register_breakpoint(thread_number);
+#ifdef debug
+            cerr << "Sent breakpoint from thread " << thread_number << endl;
+#endif
+        }
+    }
 }
 
 void VGAlignmentEmitter::emit_singles(vector<Alignment>&& aln_batch) {
