@@ -69,7 +69,9 @@ public:
     /// Both ends of each pair must have the same number of mappings.
     virtual void emit_mapped_pairs(vector<vector<Alignment>>&& alns1_batch,
         vector<vector<Alignment>>&& alns2_batch, vector<int64_t>&& tlen_limit_batch) = 0;
-    
+
+    /// Emit some extra type-tagged data, if the backing format supports it.
+    virtual void emit_extra_message(const std::string& tag, std::string&& data);
     
     // These single-read methods have default implementations.
     
@@ -176,6 +178,8 @@ public:
     /// Finish and drstroy a VGAlignmentEmitter.
     ~VGAlignmentEmitter();
     
+    virtual void emit_extra_message(const std::string& tag, std::string&& data);
+
     /// Emit a batch of Alignments.
     virtual void emit_singles(vector<Alignment>&& aln_batch);
     /// Emit a batch of Alignments with secondaries. All secondaries must have

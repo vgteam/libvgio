@@ -162,13 +162,27 @@ void for_each_parallel_impl(std::istream& in,
 
         std::vector<std::string> *batch = nullptr;
         
+        bool first_message = true;
+
         while (message_it.has_current()) {
             // Until we run out of messages, grab them with their tags
             auto tag_and_data = std::move(message_it.take());
             
             // Check the tag.
             // TODO: we should only do this when it changes!
-            handle(Registry::check_protobuf_tag<T>(tag_and_data.first));
+            bool right_tag = Registry::check_protobuf_tag<T>(tag_and_data.first);
+            if (!right_tag) {
+                // This isn't the data we were expecting.
+                if (first_message) {
+                    // If this happens on the very first message, we know this is the wrong kind of stream.
+                    throw std::runtime_error("expected a stream of " + T::descriptor()->full_name() + " but found first message with tag " + tag_and_data.first);
+                } else {
+                    // On other mesages, just skip them if they aren't what we care about.
+                    first_message = false;
+                    continue;
+                }
+            }
+            first_message = false;
             
             // If the tag checks out
             
