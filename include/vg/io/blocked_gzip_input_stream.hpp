@@ -80,6 +80,10 @@ public:
     /// Return true if the stream being read really is BGZF, and false if we
     /// are operating on a non-blocked GZIP or uncompressed file.
     virtual bool IsBGZF() const;
+
+    /// Turn on multithreaded decompression. Return true if successful and
+    /// false if the BGZF could not set up its thread pool.
+    virtual bool EnableMultiThreading(size_t thread_count);
     
     /// Return true if the given istream looks like GZIP-compressed data (i.e.
     /// has the GZIP magic number as its first two bytes). Replicates some of

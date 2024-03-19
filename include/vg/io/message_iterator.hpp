@@ -72,7 +72,7 @@ public:
     static string sniff_tag(::google::protobuf::io::ZeroCopyInputStream& stream);
 
     /// Constructor to wrap a stream.
-    MessageIterator(istream& in, bool verbose = false);
+    MessageIterator(istream& in, bool verbose = false, size_t thread_count = 0);
     
     /// Constructor to wrap an existing BGZF 
     MessageIterator(unique_ptr<BlockedGzipInputStream>&& bgzf, bool verbose = false);
