@@ -15,6 +15,9 @@ void finish(std::ostream& out, bool compressed) {
     }
 }
 
+std::function<void(size_t, size_t)> NO_PROGRESS = [](size_t, size_t) {};
+std::function<bool(void)> NO_WAIT = []() { return true; };
+
 }
 
 }

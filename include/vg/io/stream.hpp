@@ -11,6 +11,7 @@
 #include <functional>
 #include <vector>
 #include <list>
+#include <limits>
 
 #include "registry.hpp"
 #include "message_iterator.hpp"
@@ -22,6 +23,11 @@ namespace vg {
 namespace io {
 
 using namespace std;
+
+/// Get the length of the input stream, or std::numeric_limits<size_t>::max() if unavailable.
+size_t get_stream_length(std::istream& in);
+/// Get the current offset in the input stream, or std;:numeric_limits<size_t>::max() if unavailable.
+size_t get_stream_position(std::istream& in);
 
 /// Write the EOF marker to the given stream, so that readers won't complain that it might be truncated when they read it in.
 /// Internal EOF markers MAY exist, but a file SHOULD have exactly one EOF marker at its end.
@@ -121,6 +127,11 @@ void for_each(std::istream& in,
 
 // Parallelized versions of for_each
 
+// Default progress function that does nothing.
+std::function<void(size_t, size_t)> NO_PROGRESS;
+// Default waiting function that always returns true.
+std::function<bool(void)> NO_WAIT;
+
 // First, an internal implementation underlying several variants below.
 // lambda2 is invoked on interleaved pairs of elements from the stream. The
 // elements of each pair are in order, but the overall order in which lambda2
@@ -128,13 +139,22 @@ void for_each(std::istream& in,
 // last element of the stream, if any.
 // objects will be handed off to worker threads in batches of "batch_size" which
 // must be divisible by 2.
+// The progress function is invoked periodically with the input stream offset
+// and length, or std::numeric_limits<size_t>::max() if they are unavailable.
 
 template <typename T>
 void for_each_parallel_impl(std::istream& in,
                             const std::function<void(T&,T&)>& lambda2,
                             const std::function<void(T&)>& lambda1,
                             const std::function<bool(void)>& single_threaded_until_true,
-                            size_t batch_size) {
+                            size_t batch_size,
+                            const std::function<void(size_t, size_t)>& progress = NO_PROGRESS) {
+
+    size_t stream_length = get_stream_length(in);
+    if (stream_length == std::numeric_limits<size_t>::max()) {
+        // Tell the progress function there will be no progress.
+        progress(stream_length, stream_length);
+    }
 
     assert(batch_size % 2 == 0); //for_each_parallel::batch_size must be even
     // max # of such batches to be holding in memory
@@ -270,6 +290,11 @@ void for_each_parallel_impl(std::istream& in,
 
                 batch = nullptr;
             }
+
+            if (stream_length != std::numeric_limits<size_t>::max()) {
+                // Do progress
+                progress(get_stream_position(in), stream_length);
+            }
         }
 
         #pragma omp taskwait
@@ -301,33 +326,34 @@ void for_each_parallel_impl(std::istream& in,
 template <typename T>
 void for_each_interleaved_pair_parallel(std::istream& in,
                                         const std::function<void(T&,T&)>& lambda2,
-                                        size_t batch_size = 256) {
+                                        size_t batch_size = 256,
+                                        const std::function<void(size_t, size_t)>& progress = NO_PROGRESS) {
     std::function<void(T&)> err1 = [](T&){
         throw std::runtime_error("io::for_each_interleaved_pair_parallel: expected input stream of interleaved pairs, but it had odd number of elements");
     };
-    std::function<bool(void)> no_wait = [](void) {return true;};
-    for_each_parallel_impl(in, lambda2, err1, no_wait, batch_size);
+    for_each_parallel_impl(in, lambda2, err1, NO_WAIT, batch_size, progress);
 }
     
 template <typename T>
 void for_each_interleaved_pair_parallel_after_wait(std::istream& in,
                                                    const std::function<void(T&,T&)>& lambda2,
                                                    const std::function<bool(void)>& single_threaded_until_true,
-                                                   size_t batch_size = 256) {
+                                                   size_t batch_size = 256,
+                                                   const std::function<void(size_t, size_t)>& progress = NO_PROGRESS) {
     std::function<void(T&)> err1 = [](T&){
         throw std::runtime_error("io::for_each_interleaved_pair_parallel: expected input stream of interleaved pairs, but it had odd number of elements");
     };
-    for_each_parallel_impl(in, lambda2, err1, single_threaded_until_true, batch_size);
+    for_each_parallel_impl(in, lambda2, err1, single_threaded_until_true, batch_size, progress);
 }
 
 // parallelized for each individual element
 template <typename T>
 void for_each_parallel(std::istream& in,
                        const std::function<void(T&)>& lambda1,
-                       size_t batch_size = 256) {
+                       size_t batch_size = 256,
+                       const std::function<void(size_t, size_t)>& progress = NO_PROGRESS) {
     std::function<void(T&,T&)> lambda2 = [&lambda1](T& o1, T& o2) { lambda1(o1); lambda1(o2); };
-    std::function<bool(void)> no_wait = [](void) {return true;};
-    for_each_parallel_impl(in, lambda2, lambda1, no_wait, batch_size);
+    for_each_parallel_impl(in, lambda2, lambda1, NO_WAIT, batch_size, progress);
 }
 
 }
