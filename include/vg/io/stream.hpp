@@ -170,7 +170,7 @@ void for_each_parallel_impl(std::istream& in,
 
     // this loop handles a chunked file with many pieces
     // such as we might write in a multithreaded process
-    #pragma omp parallel default(none) shared(in, lambda1, lambda2, batches_outstanding, max_batches_outstanding, single_threaded_until_true, cerr, batch_size)
+    #pragma omp parallel default(none) shared(in, lambda1, lambda2, progress, stream_length, batches_outstanding, max_batches_outstanding, single_threaded_until_true, cerr, batch_size)
     #pragma omp single
     {
         auto handle = [](bool retval) -> void {
