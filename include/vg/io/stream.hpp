@@ -128,9 +128,9 @@ void for_each(std::istream& in,
 // Parallelized versions of for_each
 
 // Default progress function that does nothing.
-std::function<void(size_t, size_t)> NO_PROGRESS;
+const std::function<void(size_t, size_t)> NO_PROGRESS = [](size_t, size_t) {};
 // Default waiting function that always returns true.
-std::function<bool(void)> NO_WAIT;
+const std::function<bool(void)> NO_WAIT = []() { return true; };
 
 // First, an internal implementation underlying several variants below.
 // lambda2 is invoked on interleaved pairs of elements from the stream. The
