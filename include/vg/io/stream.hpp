@@ -107,30 +107,43 @@ void write_to_file(const T& item, const string& filename) {
     out.close();
 }
 
+// Default progress function that does nothing.
+const std::function<void(size_t, size_t)> NO_PROGRESS = [](size_t, size_t) {};
+// Default waiting function that always returns true.
+const std::function<bool(void)> NO_WAIT = []() { return true; };
+
 template <typename T>
 void for_each(std::istream& in,
-              const std::function<void(int64_t, T&)>& lambda) {
+              const std::function<void(int64_t, T&)>& lambda,
+              const std::function<void(size_t, size_t)>& progress = NO_PROGRESS) {
     
+    size_t stream_length = get_stream_length(in);
+    if (stream_length == std::numeric_limits<size_t>::max()) {
+        // Tell the progress function there will be no progress.
+        progress(stream_length, stream_length);
+    }
+
     for(ProtobufIterator<T> it(in); it.has_current(); ++it) {
         // For each message in the file, parse and process it with its group VO (or -1)
         lambda(it.tell_group(), *it);
+
+        if (stream_length != std::numeric_limits<size_t>::max()) {
+            // Do progress
+            progress(get_stream_position(in), stream_length);
+        }
     }
 }
 
 template <typename T>
 void for_each(std::istream& in,
-              const std::function<void(T&)>& lambda) {
+              const std::function<void(T&)>& lambda,
+              const std::function<void(size_t, size_t)>& progress = NO_PROGRESS) {
     for_each(in, static_cast<const typename std::function<void(int64_t, T&)>&>([&lambda](int64_t virtual_offset, T& item) {
         lambda(item);
-    }));
+    }), progress);
 }
 
 // Parallelized versions of for_each
-
-// Default progress function that does nothing.
-const std::function<void(size_t, size_t)> NO_PROGRESS = [](size_t, size_t) {};
-// Default waiting function that always returns true.
-const std::function<bool(void)> NO_WAIT = []() { return true; };
 
 // First, an internal implementation underlying several variants below.
 // lambda2 is invoked on interleaved pairs of elements from the stream. The
