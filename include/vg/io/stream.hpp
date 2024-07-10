@@ -191,9 +191,8 @@ void for_each_parallel_impl(std::istream& in,
         };
         
         // We do our own multi-threaded Protobuf decoding, but we batch up our
-        // strings by pulling them from this iterator, which we also
-        // multi-thread for decompression.
-        MessageIterator message_it(in, false, 8);
+        // strings by pulling them from this iterator.
+        MessageIterator message_it(in, false);
 
         std::vector<std::string> *batch = nullptr;
         
