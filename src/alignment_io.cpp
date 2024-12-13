@@ -220,6 +220,38 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
     //Note: protobuf can't distinguish between 0 and missing so we just copy it through
     gaf.mapq = aln.mapping_quality();
 
+    // we add these annotations early so that if necessary they can be overwritten by the
+    // more directly purposeful GAF annotations later in this function
+    // TODO: ugly that we have to replicate parts of vg's nice annotation.hpp system here...
+    const auto& annotations = aln.annotation();
+    if (annotations.fields().count("tags")) {
+        vector<string> tokens;
+        string tag_string = annotations.fields().at("tags").string_value();
+        size_t i = 0;
+        while (i < tag_string.size() && isspace(tag_string[i])) {
+            ++i;
+        }
+        while (i < tag_string.size()) {
+            size_t j = tag_string.find_first_of(" \t\n\r\f\v", i + 1);
+            if (j > i + 1) {
+                tokens.emplace_back(tag_string.substr(i, j - i));
+            }
+            i = j;
+            while (i < tag_string.size() && isspace(tag_string[i])) {
+                ++i;
+            }
+        }
+        
+        for (const auto& tag : tokens) {
+            if (tag.size() < 6 || tag[2] != ':' || tag[4] != ':') {
+                cerr << "error: invalid SAM-style tag annotation: " << tag << '\n';
+                exit(1);
+            }
+            // split into values
+            gaf.opt_fields[tag.substr(0, 2)] = make_pair(tag.substr(3, 1), tag.substr(5, string::npos));
+        }
+    }
+    
     if (aln.has_path() && aln.path().mapping_size() > 0) {    
         //3 int Query start (0-based; closed)
         gaf.query_start = 0; //(aln.path().mapping_size() ? first_path_position(aln.path()).offset() : "*") << "\t"
