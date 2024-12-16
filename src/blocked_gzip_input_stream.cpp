@@ -11,7 +11,7 @@ namespace io {
 
 using namespace std;
 
-BlockedGzipInputStream::BlockedGzipInputStream(std::istream& stream) : handle(nullptr), byte_count(0),
+BlockedGzipInputStream::BlockedGzipInputStream(std::istream& stream, size_t thread_count) : handle(nullptr), byte_count(0),
     know_offset(false) {
     
     // See where the stream is
@@ -29,6 +29,10 @@ BlockedGzipInputStream::BlockedGzipInputStream(std::istream& stream) : handle(nu
     handle = bgzf_hopen(wrapped, "r");
     if (handle == nullptr) {
         throw runtime_error("Unable to set up BGZF library on wrapped stream");
+    }
+
+    if (thread_count > 1 && bgzf_mt(handle, thread_count, 256) != 0) {
+        throw runtime_error("Unable to set up BGZF multi-threading");
     }
     
     if (file_start >= 0 && good && (bgzf_compression(handle) == 2 || bgzf_compression(handle) == 0)) {
@@ -259,10 +263,6 @@ bool BlockedGzipInputStream::Seek(int64_t virtual_offset) {
 bool BlockedGzipInputStream::IsBGZF() const {
     // If we are compressed and not plain GZIP, we are BGZF.
     return handle->is_compressed && !handle->is_gzip;
-}
-
-bool BlockedGzipInputStream::EnableMultiThreading(size_t thread_count) {
-    return bgzf_mt(handle, thread_count, 256) == 0;
 }
 
 bool BlockedGzipInputStream::SmellsLikeGzip(std::istream& in) {

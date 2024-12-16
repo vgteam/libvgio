@@ -140,13 +140,8 @@ string MessageIterator::sniff_tag(::google::protobuf::io::ZeroCopyInputStream& s
     return tag;
 }
 
-MessageIterator::MessageIterator(istream& in, bool verbose, size_t thread_count) : MessageIterator(unique_ptr<BlockedGzipInputStream>(new BlockedGzipInputStream(in)), verbose) {
-    if (thread_count > 1) {
-        // After making the BGZF, turn on multithreaded decoding
-        if (!bgzip_in->EnableMultiThreading(thread_count)) {
-            throw std::runtime_error("Cound not enable multithreaded BGZF decoding");
-        }
-    }
+MessageIterator::MessageIterator(istream& in, bool verbose, size_t thread_count) : MessageIterator(unique_ptr<BlockedGzipInputStream>(new BlockedGzipInputStream(in, thread_count)), verbose) {
+    // Nothing to do!
 }
 
 MessageIterator::MessageIterator(unique_ptr<BlockedGzipInputStream>&& bgzf, bool verbose) :

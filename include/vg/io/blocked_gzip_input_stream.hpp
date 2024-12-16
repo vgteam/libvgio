@@ -24,7 +24,11 @@ public:
     /// Make a new stream reading from the given C++ std::istream, wrapping it
     /// in a BGZF. The stream must be at a BGZF block header, since the header
     /// info is peeked.
-    BlockedGzipInputStream(std::istream& stream);
+    ///
+    /// If thread_count is more than 1, enables multi-threaded BGZF decoding.
+    /// This needs to be part of the comstructor to ensure that it happens
+    /// before any data is read through the decoder.
+    BlockedGzipInputStream(std::istream& stream, size_t thread_count = 0);
 
     /// Destroy the stream.
     virtual ~BlockedGzipInputStream();
@@ -81,10 +85,6 @@ public:
     /// are operating on a non-blocked GZIP or uncompressed file.
     virtual bool IsBGZF() const;
 
-    /// Turn on multithreaded decompression. Return true if successful and
-    /// false if the BGZF could not set up its thread pool.
-    virtual bool EnableMultiThreading(size_t thread_count);
-    
     /// Return true if the given istream looks like GZIP-compressed data (i.e.
     /// has the GZIP magic number as its first two bytes). Replicates some of
     /// the sniffing logic that htslib does, but puts back the sniffed

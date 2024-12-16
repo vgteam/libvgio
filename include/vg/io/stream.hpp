@@ -128,7 +128,9 @@ void for_each(std::istream& in,
         lambda(it.tell_group(), *it);
 
         if (stream_length != std::numeric_limits<size_t>::max()) {
-            // Do progress
+            // Do progress.
+            // We know ProtobufIterator uses single-threaded decompression, so
+            // we can act on the stream directly.
             progress(get_stream_position(in), stream_length);
         }
     }
@@ -193,6 +195,12 @@ void for_each_parallel_impl(std::istream& in,
         // We do our own multi-threaded Protobuf decoding, but we batch up our
         // strings by pulling them from this iterator, which we also
         // multi-thread for decompression.
+        //
+        // Note that as long as this exists, we **may not** use the "in"
+        // stream! Even just to tell() it for the current position! This will
+        // start backgorund threads that use the stream, and on mac at least
+        // even a tellg() can mutate the stream internally and cause the
+        // background threads to segfault.
         MessageIterator message_it(in, false, 8);
 
         std::vector<std::string> *batch = nullptr;
@@ -305,8 +313,16 @@ void for_each_parallel_impl(std::istream& in,
             }
 
             if (stream_length != std::numeric_limits<size_t>::max()) {
-                // Do progress
-                progress(get_stream_position(in), stream_length);
+                // Do progress. But we can't use get_stream_position because we
+                // can't use the stream!
+                //
+                // We also can't get at htslib's bgzf_htell, which synchronizes
+                // with the real read threads but isn't exposed as a symbol.
+                //
+                // So we get the virtual offset and shift off the
+                // non-block-address bits so it is a real backing file offset,
+                // just with BGZF block resolution.
+                progress(message_it.tell_group()>>16, stream_length);
             }
         }
 

@@ -36,7 +36,9 @@ using namespace std;
 template <typename T>
 class ProtobufIterator {
 public:
-    /// Constructor
+    /// Constructor. Uses single-threaded decoding, so methods may be called on
+    /// the given stream from other code while the ProtobufIterator exists, as
+    /// long as no ProtobufIterator method is running.
     ProtobufIterator(istream& in);
     
     ///////////
@@ -117,6 +119,7 @@ public:
 private:
     
     /// Wrap a MessageIterator and just do Protobuf parsing on top of that.
+    /// We always use one that is single-threaded.
     MessageIterator message_it;
     
     /// We always maintain a parsed version of the current message.
