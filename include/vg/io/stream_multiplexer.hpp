@@ -92,7 +92,7 @@ public:
      * written by the given thread so far. Implicitly also creates a
      * breakpoint.
      */
-     void register_barrier(size_t thread_number);
+    void register_barrier(size_t thread_number);
      
     /**
      * Cancel the writing of and discard all data written since the previous
@@ -105,7 +105,7 @@ public:
      * breakpoint for the given thread. If count is more than the number of
      * bytes since the last breakpoint, rewinds only to the last breakpoint.
      */
-     void discard_bytes(size_t thread_number, size_t count);
+    void discard_bytes(size_t thread_number, size_t count);
     
 private:
 

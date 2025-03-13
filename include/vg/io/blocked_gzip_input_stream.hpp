@@ -9,6 +9,10 @@ namespace vg {
 
 namespace io {
 
+/// Represents an error where an input blocked GZIP file has been truncated.
+class TruncatedBGZFError: public std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
 
 /// Protobuf-style ZeroCopyInputStream that reads data from blocked gzip
 /// format, and allows interacting with virtual offsets.
@@ -28,6 +32,9 @@ public:
     /// If thread_count is more than 1, enables multi-threaded BGZF decoding.
     /// This needs to be part of the comstructor to ensure that it happens
     /// before any data is read through the decoder.
+    ///
+    /// Throws TruncatedBGZFError immediately if the file is seekable and lacks
+    /// the BGZF EOF block.
     BlockedGzipInputStream(std::istream& stream, size_t thread_count = 0);
 
     /// Destroy the stream.
@@ -84,6 +91,10 @@ public:
     /// Return true if the stream being read really is BGZF, and false if we
     /// are operating on a non-blocked GZIP or uncompressed file.
     virtual bool IsBGZF() const;
+
+    /// Returns true if the stream being read is BGZF, it is seekable, and the
+    /// EOF marker at the end is missing.
+    virtual bool MissingEOF();
 
     /// Return true if the given istream looks like GZIP-compressed data (i.e.
     /// has the GZIP magic number as its first two bytes). Replicates some of

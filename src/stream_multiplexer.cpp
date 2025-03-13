@@ -45,6 +45,11 @@ StreamMultiplexer::~StreamMultiplexer() {
     // Make sure to flush the backing stream, so output is on disk.
     // Probably not necessary, but makes sense.
     backing_stream.flush();
+
+    // Do one last check to make sute the data was taken
+    if (backing_stream.fail()) {
+        throw std::ios_base::failure("Could not write output");
+    }
     
 #ifdef debug
     cerr << "StreamMultiplexer destroyed" << endl;
@@ -273,6 +278,10 @@ void StreamMultiplexer::writer_thread_function() {
                 
                 // Dump the data block. We know it won't leave the queue unless we pop it.
                 backing_stream << emptying;
+                if (backing_stream.fail()) {
+                    // Fail early if the disk is not taking our data.
+                    throw std::ios_base::failure("Could not write output");
+                }
                 
                 /// Lock again and pop. Nobody else could have removed the thing we were working on.
                 thread_queue_mutexes[i].lock();
@@ -313,6 +322,9 @@ void StreamMultiplexer::writer_thread_function() {
 #endif
             
             backing_stream << item;
+            if (backing_stream.fail()) {
+                throw std::ios_base::failure("Could not write output");
+            }
             
             ring_buffer_pop(i);
         }
@@ -329,6 +341,9 @@ void StreamMultiplexer::writer_thread_function() {
 #endif
         
             backing_stream << item.str().substr(0, data_bytes);
+            if (backing_stream.fail()) {
+                throw std::ios_base::failure("Could not write output");
+            }
         }
     }
     

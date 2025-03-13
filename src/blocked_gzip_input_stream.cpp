@@ -48,6 +48,11 @@ BlockedGzipInputStream::BlockedGzipInputStream(std::istream& stream, size_t thre
         // Remember the virtual offsets will be valid
         know_offset = true;
     }
+
+    if (MissingEOF()) {
+        // This file is truncated and we probably should not use it.
+        throw TruncatedBGZFError("BGZF-compressed input has been truncated and is missing its EOF marker");
+    }
 }
 
 BlockedGzipInputStream::~BlockedGzipInputStream() {
@@ -263,6 +268,23 @@ bool BlockedGzipInputStream::Seek(int64_t virtual_offset) {
 bool BlockedGzipInputStream::IsBGZF() const {
     // If we are compressed and not plain GZIP, we are BGZF.
     return handle->is_compressed && !handle->is_gzip;
+}
+
+bool BlockedGzipInputStream::MissingEOF() {
+    if (IsBGZF()) {
+        int check_result = bgzf_check_EOF(handle);
+        if (check_result == -1) {
+            // Something went badly wrong and errno is set.
+            int captured_errno = errno;
+            throw std::runtime_error("Could not check for EOF block on input: " + strerror(captured_errno));
+        } else if (check_result == 0) {
+            // We know the EOF marker is missing
+            return true;
+        }
+    }
+    // Otherwise, either it isn't BGZF, it isn't seekable, or the EOF marker is
+    // present as expected. So we can't tell anything is wrong.
+    return false;
 }
 
 bool BlockedGzipInputStream::SmellsLikeGzip(std::istream& in) {

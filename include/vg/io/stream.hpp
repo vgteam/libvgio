@@ -26,7 +26,7 @@ using namespace std;
 
 /// Get the length of the input stream, or std::numeric_limits<size_t>::max() if unavailable.
 size_t get_stream_length(std::istream& in);
-/// Get the current offset in the input stream, or std;:numeric_limits<size_t>::max() if unavailable.
+/// Get the current offset in the input stream, or std::numeric_limits<size_t>::max() if unavailable.
 size_t get_stream_position(std::istream& in);
 
 /// Write the EOF marker to the given stream, so that readers won't complain that it might be truncated when they read it in.
