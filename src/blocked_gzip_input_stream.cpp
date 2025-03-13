@@ -276,7 +276,7 @@ bool BlockedGzipInputStream::MissingEOF() {
         if (check_result == -1) {
             // Something went badly wrong and errno is set.
             int captured_errno = errno;
-            throw std::runtime_error("Could not check for EOF block on input: " + strerror(captured_errno));
+            throw std::runtime_error("Could not check for EOF block on input: " + std::string(strerror(captured_errno)));
         } else if (check_result == 0) {
             // We know the EOF marker is missing
             return true;
