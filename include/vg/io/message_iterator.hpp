@@ -72,6 +72,9 @@ public:
     static string sniff_tag(::google::protobuf::io::ZeroCopyInputStream& stream);
 
     /// Constructor to wrap a stream.
+    /// If thread_count is more than 1, enables multi-threaded BGZF decoding,
+    /// in which case no method on the stream may be called by anyone else
+    /// until the MessageIterator is destroyed!
     MessageIterator(istream& in, bool verbose = false, size_t thread_count = 0);
     
     /// Constructor to wrap an existing BGZF 
