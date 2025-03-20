@@ -45,6 +45,17 @@ StreamMultiplexer::~StreamMultiplexer() {
     // Make sure to flush the backing stream, so output is on disk.
     // Probably not necessary, but makes sense.
     backing_stream.flush();
+
+    // Do one last check to make sure the data was taken.
+    if (backing_stream.fail()) {
+        // We're not allowed to throw here or the compiler will warn, because we're in a destructor.
+        // So just exit.
+        // TODO: What if the library user thinks they can somehow recover from a
+        // write error? We'd have to change this ans also stop throwing exceptions
+        // in the writer thread.
+        std::cerr << "error:[vg::io::StreamMultiplexer]: Could not write output." << std::endl;
+        exit(1);
+    }
     
 #ifdef debug
     cerr << "StreamMultiplexer destroyed" << endl;
@@ -273,6 +284,14 @@ void StreamMultiplexer::writer_thread_function() {
                 
                 // Dump the data block. We know it won't leave the queue unless we pop it.
                 backing_stream << emptying;
+                if (backing_stream.fail()) {
+                    // Fail early if the disk is not taking our data.
+                    // No point in throwing an exception here since we're in a
+                    // writer thread and the library user wouldn't be able to
+                    // catch it. 
+                    std::cerr << "error:[vg::io::StreamMultiplexer]: Could not write output." << std::endl;
+                    exit(1);
+                }
                 
                 /// Lock again and pop. Nobody else could have removed the thing we were working on.
                 thread_queue_mutexes[i].lock();
@@ -313,6 +332,10 @@ void StreamMultiplexer::writer_thread_function() {
 #endif
             
             backing_stream << item;
+            if (backing_stream.fail()) {
+                std::cerr << "error:[vg::io::StreamMultiplexer]: Could not write output." << std::endl;
+                exit(1);
+            }
             
             ring_buffer_pop(i);
         }
@@ -329,6 +352,10 @@ void StreamMultiplexer::writer_thread_function() {
 #endif
         
             backing_stream << item.str().substr(0, data_bytes);
+            if (backing_stream.fail()) {
+                std::cerr << "error:[vg::io::StreamMultiplexer]: Could not write output." << std::endl;
+                exit(1);
+            }
         }
     }
     

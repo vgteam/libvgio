@@ -26,7 +26,7 @@ using namespace std;
 
 /// Get the length of the input stream, or std::numeric_limits<size_t>::max() if unavailable.
 size_t get_stream_length(std::istream& in);
-/// Get the current offset in the input stream, or std;:numeric_limits<size_t>::max() if unavailable.
+/// Get the current offset in the input stream, or std::numeric_limits<size_t>::max() if unavailable.
 size_t get_stream_position(std::istream& in);
 
 /// Write the EOF marker to the given stream, so that readers won't complain that it might be truncated when they read it in.
@@ -183,25 +183,28 @@ void for_each_parallel_impl(std::istream& in,
     cerr << "Looping over file in batches of size " << batch_size << endl;
 #endif
 
+    // Construct the MessageIterator in the main thread so exceptions in its
+    // startup can be caught.
+
+    // We do our own multi-threaded Protobuf decoding, but we batch up our
+    // strings by pulling them from this iterator, which we also
+    // multi-thread for decompression.
+    //
+    // Note that as long as this exists, we **may not** use the "in"
+    // stream! Even just to tell() it for the current position! This will
+    // start backgorund threads that use the stream, and on mac at least
+    // even a tellg() can mutate the stream internally and cause the
+    // background threads to segfault.
+    MessageIterator message_it(in, false, 8);
+
     // this loop handles a chunked file with many pieces
     // such as we might write in a multithreaded process
-    #pragma omp parallel default(none) shared(in, lambda1, lambda2, progress, stream_length, batches_outstanding, max_batches_outstanding, single_threaded_until_true, cerr, batch_size)
+    #pragma omp parallel default(none) shared(message_it, lambda1, lambda2, progress, stream_length, batches_outstanding, max_batches_outstanding, single_threaded_until_true, cerr, batch_size)
     #pragma omp single
     {
         auto handle = [](bool retval) -> void {
             if (!retval) throw std::runtime_error("obsolete, invalid, or corrupt protobuf input");
         };
-        
-        // We do our own multi-threaded Protobuf decoding, but we batch up our
-        // strings by pulling them from this iterator, which we also
-        // multi-thread for decompression.
-        //
-        // Note that as long as this exists, we **may not** use the "in"
-        // stream! Even just to tell() it for the current position! This will
-        // start backgorund threads that use the stream, and on mac at least
-        // even a tellg() can mutate the stream internally and cause the
-        // background threads to segfault.
-        MessageIterator message_it(in, false, 8);
 
         std::vector<std::string> *batch = nullptr;
         
