@@ -271,6 +271,17 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
         // Track running deletion status for CIGAR string.
         // if set, can just print bases (without "-") to continue
         bool running_deletion = false;
+
+        // We may have output a softclip at the start of a new node as the final mapping.
+        // In that case, we do not output the node in the path and we need to trigger the
+        // final mapping logic one step earlier.
+        size_t final_mapping = aln.path().mapping_size() - 1;
+        if (final_mapping > 0 &&
+            aln.path().mapping(final_mapping).edit_size() == 1 &&
+            edit_is_insertion(aln.path().mapping(final_mapping).edit(0))) {
+            final_mapping--;
+        }
+
         size_t total_to_len = 0;
         size_t prev_offset;
         handlegraph::oriented_node_range_t prev_range;
@@ -434,8 +445,7 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
 #ifdef debug_translation
                 std::cerr << "This is the first mapping so we start the alignment at " << gaf.path_start << " on path" << std::endl;
 #endif
-            } else if (mapping_index + 1 == aln.path().mapping_size() && mapping_index > 0 && aln.path().mapping(mapping_index).edit_size() == 1 &&
-                       edit_is_insertion(aln.path().mapping(mapping_index).edit(0))) {
+            } else if (mapping_index > final_mapping) {
                 // this is another case that comes up, giraffe adds an empty mapping for a softclip at the
                 // end.  there's no real way for the GAF cigar to distinguish these, so make sure it doesn't come up
 #ifdef debug_translation
@@ -555,7 +565,7 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
                 }
             }
             
-            if (mapping_index == aln.path().mapping_size()-1) {
+            if (mapping_index == final_mapping) {
 #ifdef debug_translation
                 std::cerr << "We are the final mapping" << std::endl;
 #endif
