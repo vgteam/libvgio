@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.10)
 project(libvgio VERSION 0.0.0 LANGUAGES CXX)
 
+OPTION(USE_INSTALLED_LIBHANDLEGRAPH "Use the version of libhandlegraph installed on the system, if it exists, instead of the bundled version [default: off]" OFF)
+
+
 # Optimize by default, but also include debug info
 set(CMAKE_CXX_FLAGS "-O3 -g ${CMAKE_CXX_FLAGS}")
 # Don't allow any -std= flags in
@@ -88,15 +91,19 @@ pkg_check_modules(HTSlib REQUIRED htslib)
 pkg_check_modules(Jansson REQUIRED jansson)
 
 # Find or build libhandlegraph
-find_package(libhandlegraph)
+if (USE_INSTALLED_LIBHANDLEGRAPH)
+    find_package(libhandlegraph)
+endif()
+
 if (${libhandlegraph_FOUND})
     message("Using installed libhandlegraph")
-elseif (NOT TARGET handlegraph_objs)
-    message("Using bundled libhandlegraph")
-    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/deps/libhandlegraph")
+elseif (TARGET handlegraph_objs)
+    message("Using libhandlegraph built by another CMake")
 else ()
-    message("Using libhandlegraph built by someone else")
+    message("Using bundled libhandlegraph")
+    add_subdirectory("${bdsg_DIR}/deps/libhandlegraph")
 endif()
+
 add_library(libhandlegraph::handlegraph_shared ALIAS handlegraph_shared)
 add_library(libhandlegraph::handlegraph_static ALIAS handlegraph_static)
 
