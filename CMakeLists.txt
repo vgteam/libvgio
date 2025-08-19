@@ -101,7 +101,7 @@ elseif (TARGET handlegraph_objs)
     message("Using libhandlegraph built by another CMake")
 else ()
     message("Using bundled libhandlegraph")
-    add_subdirectory("${bdsg_DIR}/deps/libhandlegraph")
+    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/deps/libhandlegraph")
 endif()
 
 add_library(libhandlegraph::handlegraph_shared ALIAS handlegraph_shared)
