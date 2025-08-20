@@ -49,7 +49,7 @@ class j2pb_error : public std::exception {
 	std::string _error;
 public:
 	j2pb_error(const std::string &e) : _error(e) {}
-	j2pb_error(const FieldDescriptor *field, const std::string &e) : _error(field->name() + ": " + e) {}
+	j2pb_error(const FieldDescriptor *field, const std::string &e) : _error(std::string(field->name()) + ": " + e) {}
 	virtual ~j2pb_error() throw() {};
 
 	virtual const char *what() const throw () { return _error.c_str(); };
@@ -160,7 +160,7 @@ static json_t * _pb2json(const Message& msg)
 		else
 			continue;
 
-		const std::string &name = (field->is_extension())?field->full_name():field->name();
+        std::string name((field->is_extension())?field->full_name():field->name());
 		json_object_set_new(root, name.c_str(), jf);
 	}
 	return _auto.release();
@@ -174,7 +174,7 @@ static json_t * _struct2json(const google::protobuf::Struct& msg) {
     auto status = google::protobuf::util::MessageToJsonString(msg, &buffer, opts);
     
     if (!status.ok()) {
-        throw std::runtime_error("Could not serialize " + msg.GetTypeName() + ": " + status.ToString());
+        throw std::runtime_error("Could not serialize " + std::string(msg.GetTypeName()) + ": " + status.ToString());
     }
     
     // Now parse back
@@ -329,7 +329,7 @@ static void _json2struct(google::protobuf::Struct& msg, json_t *root)
     // Parse it as a struct
     auto status = google::protobuf::util::JsonStringToMessage(buf, &msg);
     if (!status.ok()) {
-        throw std::runtime_error("Could not deserialize " + msg.GetTypeName() + ": " + status.ToString());
+        throw std::runtime_error("Could not deserialize " + std::string(msg.GetTypeName()) + ": " + status.ToString());
     }
 }
 

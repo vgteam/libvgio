@@ -15,6 +15,7 @@
 #include <memory>
 
 #include <google/protobuf/io/coded_stream.h>
+#include <google/protobuf/stubs/common.h>
 
 #include "blocked_gzip_input_stream.hpp"
 
@@ -22,6 +23,9 @@
 // protobuf scrapped the two-parameter version of this in 3.6.0
 // https://github.com/protocolbuffers/protobuf/blob/v3.6.0/src/google/protobuf/io/coded_stream.h#L387-L391
 // so we hack in support ourselves
+#ifndef GOOGLE_PROTOBUF_VERSION
+#error "Cannot determine version of Protobuf library from GOOGLE_PROTOBUF_VERSION macro"
+#endif
 #if (GOOGLE_PROTOBUF_VERSION < 3006000)
 #define SetTotalBytesLimit(N) SetTotalBytesLimit(N, N)
 #endif

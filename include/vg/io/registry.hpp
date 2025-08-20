@@ -224,7 +224,7 @@ public:
      * given type.
      */
     template<typename Message>
-    static const string& get_protobuf_tag();
+    static string get_protobuf_tag();
 
     /**
      * Check to see if the given tag is expected when deserializing Protobuf
@@ -573,7 +573,7 @@ const pair<string, save_function_t>* Registry::find_saver() {
 }
 
 template<typename Message>
-const string& Registry::get_protobuf_tag() {
+string Registry::get_protobuf_tag() {
     // Get our state
     Tables& tables = get_tables();
 
@@ -591,12 +591,12 @@ const string& Registry::get_protobuf_tag() {
 #ifdef debug
         cerr << "Tag not found for " << Message::descriptor()->full_name() << endl;
 #endif
-        const string& tag = Message::descriptor()->full_name();
+        auto tag = Message::descriptor()->full_name();
         
         // Limit tag length
         assert(tag.size() <= MAX_TAG_LENGTH);
         
-        return tag;
+        return std::string(tag);
     }
 }
 
