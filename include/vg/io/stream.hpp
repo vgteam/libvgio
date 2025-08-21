@@ -221,7 +221,7 @@ void for_each_parallel_impl(std::istream& in,
                 // This isn't the data we were expecting.
                 if (first_message) {
                     // If this happens on the very first message, we know this is the wrong kind of stream.
-                    throw std::runtime_error("expected a stream of " + T::descriptor()->full_name() + " but found first message with tag " + tag_and_data.first);
+                    throw std::runtime_error("expected a stream of " + std::string(T::descriptor()->full_name()) + " but found first message with tag " + tag_and_data.first);
                 } else {
                     // On other mesages, just skip them if they aren't what we care about.
                     first_message = false;
