@@ -32,7 +32,7 @@ size_t gaf_unpaired_for_each(function<size_t(nid_t)> node_to_length, function<st
 
     htsFile* in = hts_open(filename.c_str(), "r");
     if (in == NULL) {
-        cerr << "[vg::alignment.cpp] couldn't open " << filename << endl; exit(1);
+        cerr << "error:[vg::io::gaf_unpaired_for_each] couldn't open " << filename << endl; exit(1);
     }
     
     kstring_t s_buffer = KS_INITIALIZE;
@@ -66,7 +66,7 @@ size_t gaf_paired_interleaved_for_each(function<size_t(nid_t)> node_to_length, f
 
     htsFile* in = hts_open(filename.c_str(), "r");
     if (in == NULL) {
-        cerr << "[vg::alignment.cpp] couldn't open " << filename << endl; exit(1);
+        cerr << "error:[vg::io::gaf_paired_interleaved_for_each] couldn't open " << filename << endl; exit(1);
     }
     
     kstring_t s_buffer = KS_INITIALIZE;
@@ -103,7 +103,7 @@ size_t gaf_unpaired_for_each_parallel(function<size_t(nid_t)> node_to_length, fu
 
     htsFile* in = hts_open(filename.c_str(), "r");
     if (in == NULL) {
-        cerr << "[vg::alignment.cpp] couldn't open " << filename << endl; exit(1);
+        cerr << "error:[vg::io::gaf_unpaired_for_each_parallel] couldn't open " << filename << endl; exit(1);
     }
 
     kstring_t s_buffer = KS_INITIALIZE;
@@ -156,7 +156,8 @@ size_t gaf_paired_interleaved_for_each_parallel_after_wait(function<size_t(nid_t
     
     htsFile* in = hts_open(filename.c_str(), "r");
     if (in == NULL) {
-        cerr << "[vg::alignment.cpp] couldn't open " << filename << endl; exit(1);
+        cerr << "error:[vg::io::gaf_paired_interleaved_for_each_parallel_after_wait] couldn't open " << filename << endl;
+        exit(1);
     }
 
     kstring_t s_buffer = KS_INITIALIZE;
@@ -244,7 +245,7 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
         
         for (const auto& tag : tokens) {
             if (tag.size() < 6 || tag[2] != ':' || tag[4] != ':') {
-                cerr << "error: invalid SAM-style tag annotation: " << tag << '\n';
+                cerr << "error:[vg::io::alignment_to_gaf] invalid SAM-style tag annotation: " << tag << std::endl;
                 exit(1);
             }
             // split into values
@@ -315,7 +316,8 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
                     // set the offset of the first node
                     if (translate_through) {
                         // We can't do this if we don't have a way to get segment lengths, and that's not in the interface yet.
-                        throw std::runtime_error("Split alignments cannot be converted to named-segment-space GAF");
+                        cerr << "error:[vg::io::alignment_to_gaf] Split alignments like " << aln.name() << " cannot be converted to segment-namespaced GAF" << std::endl;
+                        exit(1);
                     }
                     if (node_seq.empty()) {
                         node_seq = node_to_sequence(position.node_id(), position.is_reverse());
@@ -724,6 +726,7 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length,
     if (!gaf.path.empty()) {
         size_t cur_mapping = 0;
         int64_t cur_offset = gaf.path_start;
+        size_t cur_op = 0;
         Position cur_position = aln.path().mapping(cur_mapping).position();
         size_t cur_len = node_to_length(cur_position.node_id());
         string& sequence = *aln.mutable_sequence();
@@ -796,6 +799,18 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length,
                     }
                 } else if (cigar_cat == '*') {
                     assert(cigar_len == 1);
+                    if (node_to_sequence) {
+                        // Make sure the node actually has the sequence we're replacing
+                        std::string should_be_replaced = node_to_sequence(cur_position.node_id(), cur_position.is_reverse()).substr(cur_offset, 1);
+                        if (should_be_replaced != cigar_target) {
+                            cerr << "error:[vg::io::gaf_to_alignment] GAF alignment of " << aln.name() 
+                                << " says " << cigar_target << " should be replaced with " << cigar_query
+                                << " at node " << cur_position.node_id() << (cur_position.is_reverse() ? "-" : "+") << cur_offset
+                                << " in visit " << cur_mapping << " at operation " << cur_op
+                                << " but graph has " << should_be_replaced << " there instead. Does this GAF beling to this graph?" << std::endl;
+                            exit(1);    
+                        }
+                    }
                     assert(!node_to_sequence || node_to_sequence(cur_position.node_id(), cur_position.is_reverse()).substr(cur_offset,1) == cigar_target);
                     Edit* edit = aln.mutable_path()->mutable_mapping(cur_mapping)->add_edit();
                     // todo: support multibase snps
@@ -805,8 +820,8 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length,
                     sequence += edit->sequence();
                     ++cur_offset;
                 } else {
-                    //todo: better error (warning?)
-                    assert(false);
+                    std::cerr << "error:[vg::io::gaf_to_alignment] GAF alignment of " << aln.name() << " has unrecognized operation \"" << cigar_cat << "\"" << std::endl;
+                    exit(1);
                 }
             
                 // advance to the next mapping if we've pushed the offset past the current node
@@ -819,6 +834,7 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length,
                         cur_len = node_to_length(cur_position.node_id());
                     }
                 }
+                ++cur_op;
             });
 
         // this is to support gafs that were made from alignments where the last mapping is
