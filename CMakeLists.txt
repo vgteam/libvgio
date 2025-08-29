@@ -104,9 +104,6 @@ else ()
     add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/deps/libhandlegraph")
 endif()
 
-add_library(libhandlegraph::handlegraph_shared ALIAS handlegraph_shared)
-add_library(libhandlegraph::handlegraph_static ALIAS handlegraph_static)
-
 if (CMAKE_MAJOR_VERSION EQUAL "3" AND (CMAKE_MINOR_VERSION EQUAL "10" OR CMAKE_MINOR_VERSION EQUAL "11"))
     # Set link directories. We can't yet use target_link_directories to keep
     # these straight between static and dynamic libraries since it's not
@@ -146,7 +143,8 @@ add_dependencies(vgio link_target)
 add_dependencies(vgio_static link_target)
 
 # Add an alias so that library can be used inside the build tree, e.g. when testing
-add_library(VGio::vgio ALIAS vgio)
+add_library(VGio::VGio ALIAS vgio)
+add_library(VGio::VGio_static ALIAS vgio_static)
 
 # Set target properties
 target_include_directories(vgio
