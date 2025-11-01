@@ -661,6 +661,14 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
             }
         }
     }
+    else {
+        // No path, so an unaligned sequence.
+        // If we emit a cs-cigar string, we can use it to preserve the sequence.
+        if (cs_cigar) {
+            string cs_cigar_str = "+" + aln.sequence();
+            gaf.opt_fields["cs"] = make_pair("Z", std::move(cs_cigar_str));
+        }
+    }
 
     // optional frag_next/prev names
     if (frag_links == true) {
@@ -843,6 +851,23 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length,
             google::protobuf::Value is_from_cg;
             is_from_cg.set_bool_value(from_cg);
             (*annotation->mutable_fields())["from_cg"] = is_from_cg;
+        }
+    }
+    else {
+        // No path, so an unaligned sequence.
+        // If we have a cs-cigar string with insertions only and their total length
+        // matches the query length, we can use it to set the sequence.
+        std::string potential_sequence;
+        bool valid = true;
+        gafkluge::for_each_cs(gaf, [&](const std::string& op) {
+            if (op.empty() || op[0] != '+') {
+                valid = false;
+                return;
+            }
+            potential_sequence.append(op, 1);
+        });
+        if (valid && potential_sequence.size() == gaf.query_length) {
+            *aln.mutable_sequence() = std::move(potential_sequence);
         }
     }
 
