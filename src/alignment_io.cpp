@@ -13,10 +13,12 @@ namespace vg {
 namespace io {
 
 bool get_next_record_from_gaf(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, htsFile* fp, kstring_t& s_buffer, gafkluge::GafRecord& record) {
-    
-    if (hts_getline(fp, '\n', &s_buffer) <= 0) {
-        return false;
-    }
+
+    do {
+        if (hts_getline(fp, '\n', &s_buffer) <= 0) {
+            return false;
+        }
+    } while (gafkluge::is_gaf_header_line(ks_str(&s_buffer)));
 
     gafkluge::parse_gaf_record(ks_str(&s_buffer), record);
     return true;
@@ -30,6 +32,7 @@ bool get_next_interleaved_record_pair_from_gaf(function<size_t(nid_t)> node_to_l
 
 size_t gaf_unpaired_for_each(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const string& filename, function<void(Alignment&)> lambda) {
 
+    // TODO: parse header lines
     htsFile* in = hts_open(filename.c_str(), "r");
     if (in == NULL) {
         cerr << "[vg::alignment.cpp] couldn't open " << filename << endl; exit(1);
@@ -64,6 +67,7 @@ size_t gaf_unpaired_for_each(const HandleGraph& graph, const string& filename, f
 size_t gaf_paired_interleaved_for_each(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const string& filename,
                                        function<void(Alignment&, Alignment&)> lambda) {
 
+    // TODO: parse header lines
     htsFile* in = hts_open(filename.c_str(), "r");
     if (in == NULL) {
         cerr << "[vg::alignment.cpp] couldn't open " << filename << endl; exit(1);
@@ -101,6 +105,7 @@ size_t gaf_unpaired_for_each_parallel(function<size_t(nid_t)> node_to_length, fu
                                       function<void(Alignment&)> lambda,
                                       uint64_t batch_size) {
 
+    // TODO: parse header lines
     htsFile* in = hts_open(filename.c_str(), "r");
     if (in == NULL) {
         cerr << "[vg::alignment.cpp] couldn't open " << filename << endl; exit(1);
@@ -154,6 +159,7 @@ size_t gaf_paired_interleaved_for_each_parallel_after_wait(function<size_t(nid_t
                                                            function<bool(void)> single_threaded_until_true,
                                                            uint64_t batch_size) {
     
+    // TODO: parse header lines
     htsFile* in = hts_open(filename.c_str(), "r");
     if (in == NULL) {
         cerr << "[vg::alignment.cpp] couldn't open " << filename << endl; exit(1);

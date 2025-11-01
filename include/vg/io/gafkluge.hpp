@@ -37,6 +37,17 @@ inline bool is_missing(int64_t i) {
     return i == missing_int;
 }
 
+/// Returns true if the given line is a GAF header line.
+inline bool is_gaf_header_line(const std::string& line) {
+    return !line.empty() && line[0] == '@';
+}
+
+/// Returns true if the given line is a GAF header line.
+/// Assumes that the pointer is valid.
+inline bool is_gaf_header_line(const char* line) {
+    return line != nullptr && line[0] == '@';
+}
+
 /**
  * One step of a GAF path
  */
