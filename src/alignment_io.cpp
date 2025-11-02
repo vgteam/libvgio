@@ -671,6 +671,8 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
         // No path, so an unaligned sequence.
         // If we emit a cs-cigar string, we can use it to preserve the sequence.
         if (cs_cigar) {
+            gaf.query_start = 0;
+            gaf.query_end = aln.sequence().length();
             string cs_cigar_str = "+" + aln.sequence();
             gaf.opt_fields["cs"] = make_pair("Z", std::move(cs_cigar_str));
         }
