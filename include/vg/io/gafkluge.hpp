@@ -48,6 +48,11 @@ inline bool is_gaf_header_line(const char* line) {
     return line != nullptr && line[0] == '@';
 }
 
+/// Writes a GAF file header with the given version number to the given output stream.
+inline void write_gaf_file_header(std::ostream& out, const std::string& version) {
+    out << "@HD\tVN:Z:" << version << std::endl;
+}
+
 /**
  * One step of a GAF path
  */

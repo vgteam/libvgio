@@ -212,7 +212,8 @@ private:
  */
 class GafAlignmentEmitter : public AlignmentEmitter {
 public:
-    /// Create a GafAlignmentEmitter writing to the given file (or "-")
+    /// Create a GafAlignmentEmitter writing to the given file (or "-").
+    /// Also writes an empty header to the file.
     GafAlignmentEmitter(const string& filename,
                         const string& format,
                         const HandleGraph& _graph,
