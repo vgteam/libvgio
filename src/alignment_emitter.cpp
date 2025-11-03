@@ -440,7 +440,10 @@ GafAlignmentEmitter::GafAlignmentEmitter(const string& filename,
         cerr << "Output stream is at " << cout.tellp() << endl;
     }
 #endif
-    
+
+    // TODO: How do we write actual header information?
+    // TODO: It would be cleaner to do this before creating the multiplexer.
+    // Write an empty header to the file.
     if (filename != "-") {
         // Check the file
         if (!*out_file) {
@@ -448,8 +451,11 @@ GafAlignmentEmitter::GafAlignmentEmitter(const string& filename,
             cerr << "[vg::GafAlignmentEmitter] failed to open " << filename << " for writing " << format << " output" << endl;
             exit(1);
         }
+        gafkluge::write_gaf_file_header(*out_file, "1.0");
+    } else {
+        gafkluge::write_gaf_file_header(std::cout, "1.0");
     }
-    
+
     // We later infer our format and output destination from out_file and proto being empty/set.
 }
 
