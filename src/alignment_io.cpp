@@ -13,13 +13,16 @@ namespace vg {
 namespace io {
 
 std::vector<std::string> read_gaf_header_lines(const std::string& filename) {
+    std::vector<std::string> header_lines;
+    if (filename == "-") {
+        return header_lines;
+    }
     htsFile* in = hts_open(filename.c_str(), "r");
     if (in == NULL) {
         std::cerr << "error: [vg::io::alignment_io.cpp] couldn't open " << filename << std::endl;
         std::exit(EXIT_FAILURE);
     }
 
-    std::vector<std::string> header_lines;
     kstring_t s_buffer = KS_INITIALIZE;
     while (hts_getline(in, '\n', &s_buffer) > 0) {
         if (!gafkluge::is_gaf_header_line(ks_str(&s_buffer))) {

@@ -41,6 +41,7 @@ size_t paired_for_each_parallel_after_wait(function<bool(T&, T&)> get_pair_if_av
                                            uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
 
 // Opens an htsFile, reads GAF header lines, and closes the file.
+// Does nothing if the file refers to stdin ("-"), as we probably can't rewind it.
 // Returns the header lines without the trailing newline characters.
 std::vector<std::string> read_gaf_header_lines(const std::string& filename);
 
