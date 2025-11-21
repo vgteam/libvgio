@@ -12,6 +12,33 @@ namespace vg {
 
 namespace io {
 
+std::vector<std::string> read_gaf_header_lines(const std::string& filename) {
+    std::vector<std::string> header_lines;
+    if (filename == "-") {
+        return header_lines;
+    }
+    htsFile* in = hts_open(filename.c_str(), "r");
+    if (in == NULL) {
+        std::cerr << "error: [vg::io::alignment_io.cpp] couldn't open " << filename << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
+
+    kstring_t s_buffer = KS_INITIALIZE;
+    while (hts_getline(in, '\n', &s_buffer) > 0) {
+        if (!gafkluge::is_gaf_header_line(ks_str(&s_buffer))) {
+            break;
+        }
+        std::string line(ks_str(&s_buffer));
+        if (!line.empty() && line.back() == '\n') {
+            line.pop_back();
+        }
+        header_lines.push_back(line);
+    }
+
+    hts_close(in);
+    return header_lines;
+}
+
 bool get_next_record_from_gaf(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, htsFile* fp, kstring_t& s_buffer, gafkluge::GafRecord& record) {
 
     do {
@@ -32,10 +59,9 @@ bool get_next_interleaved_record_pair_from_gaf(function<size_t(nid_t)> node_to_l
 
 size_t gaf_unpaired_for_each(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const string& filename, function<void(Alignment&)> lambda) {
 
-    // TODO: parse header lines
     htsFile* in = hts_open(filename.c_str(), "r");
     if (in == NULL) {
-        cerr << "[vg::alignment.cpp] couldn't open " << filename << endl; exit(1);
+        cerr << "error: [vg::io::alignment_io.cpp] couldn't open " << filename << endl; exit(1);
     }
     
     kstring_t s_buffer = KS_INITIALIZE;
@@ -67,10 +93,9 @@ size_t gaf_unpaired_for_each(const HandleGraph& graph, const string& filename, f
 size_t gaf_paired_interleaved_for_each(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const string& filename,
                                        function<void(Alignment&, Alignment&)> lambda) {
 
-    // TODO: parse header lines
     htsFile* in = hts_open(filename.c_str(), "r");
     if (in == NULL) {
-        cerr << "[vg::alignment.cpp] couldn't open " << filename << endl; exit(1);
+        cerr << "error: [vg::io::alignment_io.cpp] couldn't open " << filename << endl; exit(1);
     }
     
     kstring_t s_buffer = KS_INITIALIZE;
@@ -105,10 +130,9 @@ size_t gaf_unpaired_for_each_parallel(function<size_t(nid_t)> node_to_length, fu
                                       function<void(Alignment&)> lambda,
                                       uint64_t batch_size) {
 
-    // TODO: parse header lines
     htsFile* in = hts_open(filename.c_str(), "r");
     if (in == NULL) {
-        cerr << "[vg::alignment.cpp] couldn't open " << filename << endl; exit(1);
+        cerr << "error: [vg::io::alignment_io.cpp] couldn't open " << filename << endl; exit(1);
     }
 
     kstring_t s_buffer = KS_INITIALIZE;
@@ -159,10 +183,9 @@ size_t gaf_paired_interleaved_for_each_parallel_after_wait(function<size_t(nid_t
                                                            function<bool(void)> single_threaded_until_true,
                                                            uint64_t batch_size) {
     
-    // TODO: parse header lines
     htsFile* in = hts_open(filename.c_str(), "r");
     if (in == NULL) {
-        cerr << "[vg::alignment.cpp] couldn't open " << filename << endl; exit(1);
+        cerr << "error: [vg::io::alignment_io.cpp] couldn't open " << filename << endl; exit(1);
     }
 
     kstring_t s_buffer = KS_INITIALIZE;
