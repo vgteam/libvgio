@@ -213,16 +213,21 @@ private:
 class GafAlignmentEmitter : public AlignmentEmitter {
 public:
     /// Create a GafAlignmentEmitter writing to the given file (or "-").
-    /// Also writes an empty header to the file.
+    /// Also writes an file header with a version number.
     GafAlignmentEmitter(const string& filename,
                         const string& format,
                         const HandleGraph& _graph,
                         size_t max_threads,
                         const handlegraph::NamedNodeBackTranslation* translate_through = nullptr);
     
-    /// Finish and drstroy a VGAlignmentEmitter.
+    /// Finish and destroy a GafAlignmentEmitter.
     ~GafAlignmentEmitter();
     
+    /// Emit a batch of header lines, which are assumed to start with '@' and not end with '\n'.
+    /// A file header ("@HD") with a version number is written automatically on construction.
+    /// This operation is not thread safe and must be done before emitting any alignments.
+    void emit_header_lines(const std::vector<std::string>& header_lines);
+
     /// Emit a batch of Alignments.
     virtual void emit_singles(vector<Alignment>&& aln_batch);
     /// Emit a batch of Alignments with secondaries. All secondaries must have

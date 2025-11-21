@@ -441,9 +441,7 @@ GafAlignmentEmitter::GafAlignmentEmitter(const string& filename,
     }
 #endif
 
-    // TODO: How do we write actual header information?
-    // TODO: It would be cleaner to do this before creating the multiplexer.
-    // Write an empty header to the file.
+    // Write a file header with a version number.
     if (filename != "-") {
         // Check the file
         if (!*out_file) {
@@ -472,6 +470,15 @@ GafAlignmentEmitter::~GafAlignmentEmitter() {
 #ifdef debug
     cerr << "Destroyed GafAlignmentEmitter" << endl;
 #endif
+}
+
+void GafAlignmentEmitter::emit_header_lines(const std::vector<std::string>& header_lines) {
+    std::ostream& out = (this->out_file.get() != nullptr ? *(this->out_file) : std::cout);
+    for (const std::string& line : header_lines) {
+        out.write(line.data(), line.size());
+        out.put('\n');
+    }
+    out.flush();
 }
 
 void GafAlignmentEmitter::emit_singles(vector<Alignment>&& aln_batch) {
