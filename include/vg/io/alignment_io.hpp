@@ -39,6 +39,11 @@ size_t paired_for_each_parallel_after_wait(function<bool(T&, T&)> get_pair_if_av
                                            function<void(T&, T&)> lambda,
                                            function<bool(void)> single_threaded_until_true,
                                            uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+
+// Opens an htsFile, reads GAF header lines, and closes the file.
+// Returns the header lines without the trailing newline characters.
+std::vector<std::string> read_gaf_header_lines(const std::string& filename);
+
 // single gaf
 bool get_next_record_from_gaf(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, htsFile* fp, kstring_t& s_buffer, gafkluge::GafRecord& record);
 bool get_next_record_pair_from_gaf(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, htsFile* fp, kstring_t& s_buffer,
