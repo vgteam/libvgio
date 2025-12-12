@@ -280,6 +280,10 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
             gaf.opt_fields[tag.substr(0, 2)] = make_pair(tag.substr(3, 1), tag.substr(5, string::npos));
         }
     }
+    if (annotations.fields().count("supplementaries")) {
+        // transfer supplementaries as a tag 'sa', which differs somewhat from the conventional SA tag for BAMs
+        gaf.opt_fields["sa"] = make_pair(string("Z"), annotations.fields().at("supplementaries").string_value());
+    }
     
     if (aln.has_path() && aln.path().mapping_size() > 0) {    
         //3 int Query start (0-based; closed)
@@ -926,6 +930,12 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length,
             google::protobuf::Value is_properly_paired;
             is_properly_paired.set_bool_value(opt_it.second.second == "1");
             (*annotation->mutable_fields())["proper_pair"] = is_properly_paired;
+        } else if (opt_it.first == "sa") {
+            // we use "sa" as opposed to "SA" for our particular articulation of supplementary alignments
+            auto* annotation = aln.mutable_annotation();
+            google::protobuf::Value supp_tag;
+            supp_tag.set_string_value(opt_it.second.second);
+            (*annotation->mutable_fields())["supplementaries"] = supp_tag;
         }
     }
 }
