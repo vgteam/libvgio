@@ -5,6 +5,7 @@
 #include <sstream>
 #include <regex>
 #include <cmath>
+#include <string>
 
 //#define debug_translation
 
@@ -219,6 +220,215 @@ size_t gaf_paired_interleaved_for_each_parallel_after_wait(const HandleGraph& gr
     return gaf_paired_interleaved_for_each_parallel_after_wait(node_to_length, node_to_sequence, filename, lambda, single_threaded_until_true, batch_size);
 }
 
+string supplementary_tag_value(const Alignment& primary) {
+    
+    stringstream strm;
+    
+    for (const Alignment& supplementary : primary.supplementary()) {
+        
+        assert(supplementary.path().mapping_size() != 0);
+                
+        // encode path
+        for (const auto& mapping : supplementary.path().mapping()) {
+            const auto& pos = mapping.position();
+            strm << (pos.is_reverse() ? '<' : '>') << pos.node_id();
+        }
+        
+        // encode offset
+        strm << ',' << supplementary.path().mapping(0).position().offset() << ',';
+        
+        // encode alignment as CIGAR
+        const auto& path = supplementary.path();
+        char curr_op = '\0';
+        int curr_len = 0;
+        for (size_t i = 0; i < path.mapping_size(); ++i) {
+            const auto& mapping = path.mapping(i);
+            for (size_t j = 0; j < mapping.edit_size(); ++j) {
+                const auto& edit = mapping.edit(j);
+                char op;
+                int len;
+                if (edit.from_length() == edit.to_length()) {
+                    if (!edit.sequence().empty()) {
+                        op = 'X';
+                    }
+                    else {
+                        op = '=';
+                    }
+                    len = edit.from_length();
+                }
+                else if (edit.from_length() != 0) {
+                    op = 'D';
+                    len = edit.from_length();
+                }
+                else {
+                    if ((i == 0 && j == 0) ||
+                        (i + 1 == path.mapping_size() && j + 1 == mapping.edit_size())) {
+                        op = 'S';
+                    }
+                    else {
+                        op = 'I';
+                    }
+                    len = edit.to_length();
+                }
+                
+                if (op == curr_op) {
+                    curr_len += len;
+                }
+                else {
+                    if (curr_len != 0) {
+                        strm << curr_len << curr_op;
+                    }
+                    curr_op = op;
+                    curr_len = len;
+                }
+            }
+        }
+        
+        if (curr_len != 0) {
+            strm << curr_len << curr_op;
+        }
+        
+        // encode score and mapq
+        strm << ',' << supplementary.mapping_quality() << ',' << supplementary.score() << ';';
+    }
+    
+    return strm.str();
+}
+
+void decode_supplementary_tag_value(Alignment& primary, const string& tag_value,
+                                    const function<size_t(nid_t)>& node_to_length) {
+    
+    size_t i = 0;
+    while (i < tag_value.size()) {
+        size_t j = tag_value.find(';', i);
+        
+        auto annotation = tag_value.substr(i, j - i);
+        
+        auto& supp = *primary.add_supplementary();
+        
+        supp.set_name(primary.name());
+        supp.set_sequence(primary.sequence());
+        supp.set_quality(primary.quality());
+        supp.set_read_group(primary.read_group());
+        supp.set_sample_name(primary.sample_name());
+        supp.set_is_secondary(primary.is_secondary());
+        if (primary.has_fragment_next()) {
+            *supp.mutable_fragment_next() = primary.fragment_next();
+        }
+        if (primary.has_fragment_prev()) {
+            *supp.mutable_fragment_prev() = primary.fragment_prev();
+        }
+        google::protobuf::Value is_supp;
+        is_supp.set_bool_value(true);
+        (*supp.mutable_annotation()->mutable_fields())["supplementary"] = is_supp;
+        
+        // parse the path and initialize it
+        auto path = supp.mutable_path();
+        size_t k = 0;
+        while (annotation[k] != ',') {
+            auto mapping = path->add_mapping();
+            mapping->set_rank(path->mapping_size());
+            auto pos = mapping->mutable_position();
+            pos->set_is_reverse(annotation[k] == '<');
+            ++k;
+            size_t l = k + 1;
+            while (annotation[l] != '<' && annotation[l] != '>' && annotation[l] != ',') {
+                ++l;
+            }
+            pos->set_node_id(stoi(annotation.substr(k, l - k)));
+            pos->set_offset(0);
+            k = l;
+        }
+        
+        // parse the initial offset
+        ++k;
+        size_t l = k + 1;
+        while (annotation[l] != ',') {
+            ++l;
+        }
+        auto first_pos = path->mutable_mapping(0)->mutable_position();
+        first_pos->set_offset(stoi(annotation.substr(k, l - k)));
+        
+        // parse the edits
+        k = l + 1;
+        size_t node_offset = first_pos->offset();
+        size_t seq_offset = 0;
+        size_t mapping_idx = 0;
+        while (annotation[k] != ',') {
+            size_t l = k;
+            while (isdigit(annotation[l])) {
+                ++l;
+            }
+            int64_t op_len = stoi(annotation.substr(k, l - k));
+            char op = annotation[l];
+            switch (op) {
+                case 'I':
+                case 'S':
+                {
+                    auto edit = path->mutable_mapping(mapping_idx)->add_edit();
+                    edit->set_from_length(0);
+                    edit->set_to_length(op_len);
+                    edit->set_sequence(supp.sequence().substr(seq_offset, op_len));
+                    seq_offset += op_len;
+                    break;
+                }
+                case 'D':
+                case 'X':
+                case '=':
+                {
+                    while (op_len != 0) {
+                        
+                        size_t node_len = node_to_length(path->mapping(mapping_idx).position().node_id());
+                        size_t op_len_on_node = min<size_t>(op_len, node_len - node_offset);
+                        
+                        auto edit = path->mutable_mapping(mapping_idx)->add_edit();
+                        edit->set_from_length(op_len_on_node);
+                        if (op == 'D') {
+                            edit->set_to_length(0);
+                        }
+                        else {
+                            edit->set_to_length(op_len_on_node);
+                            if (op == 'X') {
+                                edit->set_sequence(supp.sequence().substr(seq_offset, op_len_on_node));
+                            }
+                            seq_offset += op_len_on_node;
+                        }
+                        
+                        node_offset += op_len_on_node;
+                        op_len -= op_len_on_node;
+                        if (node_offset == node_len && mapping_idx + 1 != path->mapping_size()) {
+                            // move to the next node (unless we're at the end of the last node, then
+                            // stay in place in case of a softclip at the end of the node)
+                            ++mapping_idx;
+                            node_offset = 0;
+                        }
+                    }
+                    break;
+                }
+                default:
+                    throw runtime_error("Invalid CIGAR operation: " + string(1, op) + ". Supplementary annotation can only use these CIGAR operations: =,X,I,D,S");
+                    break;
+                    
+            }
+            k = l + 1;
+        }
+        
+        // parse the mapping quality
+        ++k;
+        l = k + 1;
+        while (annotation[l] != ',') {
+            ++l;
+        }
+        supp.set_mapping_quality(stoi(annotation.substr(k, l - k)));
+        // parse the score
+        k = l + 1;
+        supp.set_score(stoi(annotation.substr(k, annotation.size() - k)));
+        
+        i = j + 1;
+    }
+    
+}
+
 gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
                                      function<string(nid_t, bool)> node_to_sequence,
                                      const Alignment& aln,
@@ -279,6 +489,10 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
             // split into values
             gaf.opt_fields[tag.substr(0, 2)] = make_pair(tag.substr(3, 1), tag.substr(5, string::npos));
         }
+    }
+    if (aln.supplementary_size() != 0) {
+        // transfer supplementaries as a tag 'sa', which differs somewhat from the conventional SA tag for BAMs
+        gaf.opt_fields["sa"] = make_pair(string("Z"), supplementary_tag_value(aln));
     }
     
     if (aln.has_path() && aln.path().mapping_size() > 0) {    
@@ -926,6 +1140,9 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length,
             google::protobuf::Value is_properly_paired;
             is_properly_paired.set_bool_value(opt_it.second.second == "1");
             (*annotation->mutable_fields())["proper_pair"] = is_properly_paired;
+        } else if (opt_it.first == "sa") {
+            // we use "sa" as opposed to "SA" for our particular articulation of supplementary alignments
+            decode_supplementary_tag_value(aln, opt_it.second.second, node_to_length);
         }
     }
 }
