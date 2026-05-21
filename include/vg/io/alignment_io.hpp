@@ -100,11 +100,19 @@ gafkluge::GafRecord alignment_to_gaf(const HandleGraph& graph,
                                      bool frag_links = true);
 // TODO: These will need to be able to take a forward translation to read named-segment GAF.
 /// Convert a GAF alignment into a vg Alignment. The alignment must be in node ID space.
+///
+/// All tags are preserved in the "tags" annotation, except those interpreted
+/// to construct the Alignment. If the "cg" tag was used to construct the
+/// alignment, it will be annotated with "from_cg" true.
 void gaf_to_alignment(function<size_t(nid_t)> node_to_length,
                       function<string(nid_t, bool)> node_to_sequence,
                       const gafkluge::GafRecord& gaf,
                       Alignment& aln);
 /// Convert a GAF alignment into a vg Alignment. The alignment must be in node ID space.
+///
+/// All tags are preserved in the "tags" annotation, except those interpreted
+/// to construct the Alignment. If the "cg" tag was used to construct the
+/// alignment, it will be annotated with "from_cg" true.
 void gaf_to_alignment(const HandleGraph& graph,
                       const gafkluge::GafRecord& gaf,
                       Alignment& aln);
