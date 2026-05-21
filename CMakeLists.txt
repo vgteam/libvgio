@@ -55,6 +55,10 @@ if (Protobuf_FOUND)
 else()
     message("No installed Protobuf has registered itself with CMake.")
 
+    # TODO: When we upgrade to CMake 3.13 minimum, use its protobuf_generate()
+    # and figure out how to not get it to pass two -I options that then make
+    # protoc claim to succeed but not actually write any files.
+
     # Fall back to FindProtobuf.cmake and hope it is a version that works with the installed Protobuf
     find_package(Protobuf REQUIRED)
 
@@ -65,7 +69,14 @@ else()
 endif()
 
 
-
+# We now have PROTO_SRCS and PROTO_HDRS. But the files for them don't generate
+# until build time. If we add PROTO_SRCS as sources for two different library
+# targets (at least with FindProtobuf.cmake), each library target gets Makefile
+# rules to run protoc, but they try to write to the same output location. If
+# they run in parallel, this causes corruption of the generated files. So we
+# need to sequence things so the Protobuf compiler runs only once, before any
+# of the libraries try to build.
+add_custom_target(run_protoc SOURCES ${PROTO_SRCS} ${PROTO_HDRS} DEPENDS ${PROTO_SRCS} ${PROTO_HDRS})
 
 
 # Find threads
@@ -148,6 +159,10 @@ set_property(TARGET vgio_static PROPERTY POSITION_INDEPENDENT_CODE OFF)
 # Don't build any object files until the Protobuf include symlink is set up and handlegraph is built
 add_dependencies(vgio link_target)
 add_dependencies(vgio_static link_target)
+
+# Don't build any object files until the protoc-generated sources are generated, once.
+add_dependencies(vgio run_protoc)
+add_dependencies(vgio_static run_protoc)
 
 # Add an alias so that library can be used inside the build tree, e.g. when testing
 add_library(VGio::vgio ALIAS vgio)
