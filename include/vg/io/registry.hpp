@@ -488,7 +488,7 @@ void Registry::register_bare_loader_saver_with_magic(const string& tag, const st
 }
 
 template<typename Handled, typename... Bases>
-void Registry::register_bare_loader_saver_with_magic(const string& tag, const string& magic,
+void Registry::register_bare_loader_with_magic(const string& tag, const string& magic,
     bare_load_function_t loader) {
 
     // Register with just one magic
