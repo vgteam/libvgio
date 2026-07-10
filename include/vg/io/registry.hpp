@@ -197,6 +197,13 @@ public:
     template<typename Handled, typename... Bases>
     static void register_bare_loader_saver_with_magic_and_filename(const string& tag, const string& magic,
         bare_load_function_with_filename_t loader, bare_save_function_t saver);
+
+    /**
+     * Like register_bare_loader_saver_with_magic_and_filename but does not register a saver.
+     */
+    template<typename Handled, typename... Bases>
+    static void register_bare_loader_with_magic_and_filename(const string& tag, const string& magic,
+        bare_load_function_with_filename_t loader);
         
     /**
      * Register a load function for a tag. The empty tag means it can run on
@@ -546,6 +553,17 @@ void Registry::register_bare_loader_saver_with_magic_and_filename(const string& 
     });
     register_saver<Handled, Bases...>(tag, wrap_bare_saver(saver));
 
+}
+
+template<typename Handled, typename... Bases>
+void Registry::register_bare_loader_with_magic_and_filename(const string& tag, const string& magic,
+    bare_load_function_with_filename_t loader) {
+
+    assert(tag.size() <= MAX_TAG_LENGTH);
+
+    register_bare_loader_with_filename<Handled, Bases...>(loader, [magic](istream& in_stream) {
+        return sniff_magic(in_stream, magic);
+    });
 }
         
 
