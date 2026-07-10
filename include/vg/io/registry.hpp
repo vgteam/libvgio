@@ -157,6 +157,14 @@ public:
     template<typename Handled, typename... Bases>
     static void register_bare_loader_saver_with_magic(const string& tag, const string& magic,
         bare_load_function_t loader, bare_save_function_t saver);
+
+    /**
+     * Like register_bare_loader_saver_with_magic(), except that no saving
+     * function is registered.
+     */
+    template<typename Handled, typename... Bases>
+    static void register_bare_loader_with_magic(const string& tag, const string& magic,
+        bare_load_function_t loader);
         
     /**
      * Like register_bare_loader_saver_with_magic(), except that multiple magic
@@ -165,6 +173,14 @@ public:
     template<typename Handled, typename... Bases>
     static void register_bare_loader_saver_with_magics(const string& tag, const vector<string>& magics,
         bare_load_function_t loader, bare_save_function_t saver);
+
+    /**
+     * Like register_bare_loader_saver_with_magics(), except that no saving
+     * function is registered.
+     */
+    template<typename Handled, typename... Bases>
+    static void register_bare_loader_with_magics(const string& tag, const vector<string>& magics,
+        bare_load_function_t loader);
 
     /**
      * Generealization of register_bare_loader_saver_with_magic, where user can supply their
@@ -465,11 +481,35 @@ void Registry::register_bare_loader_saver_with_magic(const string& tag, const st
 }
 
 template<typename Handled, typename... Bases>
+void Registry::register_bare_loader_saver_with_magic(const string& tag, const string& magic,
+    bare_load_function_t loader) {
+
+    // Register with just one magic
+    register_bare_loader_with_magics<Handled, Bases...>(tag, vector<string>({magic}), loader);
+
+}
+
+template<typename Handled, typename... Bases>
 void Registry::register_bare_loader_saver_with_magics(const string& tag, const vector<string>& magics,
     bare_load_function_t loader, bare_save_function_t saver) {
 
     // Register the type-tagged wrapped functions
     register_loader_saver<Handled, Bases...>(tag, wrap_bare_loader(loader), wrap_bare_saver(saver));
+    
+    for (auto& magic : magics) {
+        // Register the bare stream loader for each magic
+        register_bare_loader<Handled, Bases...>(loader, [magic](istream& in_stream) {
+                return sniff_magic(in_stream, magic);  
+            });
+    }
+}
+
+template<typename Handled, typename... Bases>
+void Registry::register_bare_loader_with_magics(const string& tag, const vector<string>& magics,
+    bare_load_function_t loader) {
+
+    // Register the type-tagged wrapped function
+    register_loader<Handled, Bases...>(tag, wrap_bare_loader(loader));
     
     for (auto& magic : magics) {
         // Register the bare stream loader for each magic
