@@ -913,6 +913,12 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
             string cs_cigar_str = "+" + aln.sequence();
             gaf.opt_fields["cs"] = make_pair("Z", std::move(cs_cigar_str));
         }
+
+        // emit base qualities for unaligned sequences
+        // optional base qualities                                                                                                                      
+        if (base_quals && !aln.quality().empty()) {                                                                                                     
+            gaf.opt_fields["bq"] = make_pair("Z", string_quality_short_to_char(aln.quality()));                                                         
+        }
     }
 
     // optional frag_next/prev names
