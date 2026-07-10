@@ -1116,6 +1116,7 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length,
         }
     }
 
+    std::stringstream extra_tags;
     for (auto opt_it : gaf.opt_fields) {
         if (opt_it.first == "dv") {
             // get the identity from the dv divergence field
@@ -1143,7 +1144,26 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length,
         } else if (opt_it.first == "sa") {
             // we use "sa" as opposed to "SA" for our particular articulation of supplementary alignments
             decode_supplementary_tag_value(aln, opt_it.second.second, node_to_length);
+        } else if (opt_it.first == "cs" || opt_it.first == "cg") {
+            // Skip cs and cg fields since we already read them.
+            // So do nothing here.
+        } else {
+            // Other optional fields need to go into the "tags" annotation,
+            // tab-separated, as in SAM.
+            if (extra_tags.tellp() != std::streampos(0)) {
+                // Separate from previous tag with a tab
+                extra_tags << "\t";
+            }
+            // TODO: Deduplicate with serialization in gfakluge.hpp?
+            extra_tags << opt_it.first << ":" << opt_it.second.first << ":" << opt_it.second.second;
         }
+    }
+    if (extra_tags.tellp() != std::streampos(0)) {
+        // Attach the tags annotation
+        auto* annotation = aln.mutable_annotation();
+        google::protobuf::Value extra_tags_value;
+        extra_tags_value.set_string_value(extra_tags.str());
+        (*annotation->mutable_fields())["tags"] = extra_tags_value;
     }
 }
 
