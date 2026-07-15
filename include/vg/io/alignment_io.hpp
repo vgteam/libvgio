@@ -34,6 +34,25 @@ size_t unpaired_for_each_parallel(function<bool(T&)> get_read_if_available,
                                   function<void(T&)> lambda,
                                   uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
 
+/// Like unpaired_for_each_parallel, but processes reads in groups instead of
+/// individually. Consecutive reads for which in_same_group(previous, next)
+/// returns true are collected into a single group (for example, a primary
+/// alignment followed by its secondary alignments, which share a read name).
+/// Each complete group is passed to group_lambda, and distinct groups are
+/// processed in parallel.
+///
+/// Batches are cut only at group boundaries: a batch keeps accepting reads
+/// until it holds at least batch_size reads AND the next read starts a new
+/// group. This guarantees a group is never split across batches or worker
+/// threads, at the cost of occasionally exceeding batch_size. This is what
+/// lets downstream logic (e.g. surjection secondary promotion) see a read's
+/// whole multimapping together while still running in parallel.
+template<typename T>
+size_t grouped_unpaired_for_each_parallel(function<bool(T&)> get_read_if_available,
+                                          function<void(vector<T>&)> group_lambda,
+                                          function<bool(const T&, const T&)> in_same_group,
+                                          uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+
 template<typename T>
 size_t paired_for_each_parallel_after_wait(function<bool(T&, T&)> get_pair_if_available,
                                            function<void(T&, T&)> lambda,
@@ -63,6 +82,15 @@ size_t gaf_unpaired_for_each_parallel(function<size_t(nid_t)> node_to_length, fu
 size_t gaf_unpaired_for_each_parallel(const HandleGraph& graph, const string& filename,
                                       function<void(Alignment&)> lambda,
                                       uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+// Parallel GAF iteration that keeps each read's alignments (primary and its
+// secondaries, grouped by read name) together in one call to group_lambda.
+// See grouped_unpaired_for_each_parallel for the batching-boundary semantics.
+size_t gaf_grouped_unpaired_for_each_parallel(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const string& filename,
+                                              function<void(vector<Alignment>&)> group_lambda,
+                                              uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+size_t gaf_grouped_unpaired_for_each_parallel(const HandleGraph& graph, const string& filename,
+                                              function<void(vector<Alignment>&)> group_lambda,
+                                              uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
 size_t gaf_paired_interleaved_for_each_parallel(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const string& filename,
                                                 function<void(Alignment&, Alignment&)> lambda,
                                                 uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
@@ -207,6 +235,113 @@ inline size_t unpaired_for_each_parallel(function<bool(T&)> get_read_if_availabl
                         batches_outstanding--;
                     }
                 }
+            }
+        }
+    }
+    return nLines;
+}
+
+// implementation
+template<typename T>
+inline size_t grouped_unpaired_for_each_parallel(function<bool(T&)> get_read_if_available,
+                                                 function<void(vector<T>&)> group_lambda,
+                                                 function<bool(const T&, const T&)> in_same_group,
+                                                 uint64_t batch_size) {
+    size_t nLines = 0;
+    // A batch is a set of complete groups. We never split a group across
+    // batches, so we can hand each batch to a worker thread and be sure every
+    // group is seen whole.
+    vector<vector<T>> *batch = nullptr;
+    // number of batches currently being processed
+    uint64_t batches_outstanding = 0;
+#pragma omp parallel default(none) shared(batches_outstanding, batch, nLines, get_read_if_available, group_lambda, in_same_group, batch_size)
+#pragma omp single
+    {
+        // max # of such batches to be holding in memory
+        uint64_t max_batches_outstanding = batch_size;
+        // max # we will ever increase the batch buffer to
+        const uint64_t max_max_batches_outstanding = 1 << 13; // 8192
+
+        // Reading is single-threaded, so we always have the previous read
+        // available to compare against the next one for group membership.
+        T aln;
+        bool have_pending = get_read_if_available(aln);
+
+        while (have_pending) {
+            // init a new batch of groups
+            batch = new std::vector<std::vector<T>>();
+            // count of reads (not groups) accumulated in this batch
+            uint64_t reads_in_batch = 0;
+
+            // Fill the batch. We keep going until we have at least batch_size
+            // reads AND we are at a group boundary, so a group is never split.
+            while (have_pending) {
+                // Start a new group with the pending read.
+                batch->emplace_back();
+                vector<T>& group = batch->back();
+                group.emplace_back(std::move(aln));
+                nLines++;
+                reads_in_batch++;
+
+                // Pull following reads that belong to the same group.
+                have_pending = get_read_if_available(aln);
+                while (have_pending && in_same_group(group.back(), aln)) {
+                    group.emplace_back(std::move(aln));
+                    nLines++;
+                    reads_in_batch++;
+                    have_pending = get_read_if_available(aln);
+                }
+
+                // We are now at a group boundary (either EOF or aln starts a new
+                // group). Close the batch if it is big enough. This may exceed
+                // batch_size, which is the intended trade-off for keeping groups
+                // whole.
+                if (reads_in_batch >= batch_size) {
+                    break;
+                }
+            }
+
+            // did we get a batch?
+            if (!batch->empty()) {
+
+                // how many batch tasks are outstanding currently, including this one?
+                uint64_t current_batches_outstanding;
+#pragma omp atomic capture
+                current_batches_outstanding = ++batches_outstanding;
+
+                if (current_batches_outstanding >= max_batches_outstanding) {
+                    // do this batch in the current thread because we've spawned the maximum number of
+                    // concurrent batch tasks
+                    for (auto& group : *batch) {
+                        group_lambda(group);
+                    }
+                    delete batch;
+#pragma omp atomic capture
+                    current_batches_outstanding = --batches_outstanding;
+
+                    if (4 * current_batches_outstanding / 3 < max_batches_outstanding
+                        && max_batches_outstanding < max_max_batches_outstanding) {
+                        // we went through at least 1/4 of the batch buffer while we were doing this thread's batch
+                        // this looks risky, since we want the batch buffer to stay populated the entire time we're
+                        // occupying this thread on compute, so let's increase the batch buffer size
+                        max_batches_outstanding *= 2;
+                    }
+                }
+                else {
+                    // spawn a new task to take care of this batch
+#pragma omp task default(none) firstprivate(batch) shared(batches_outstanding, group_lambda)
+                    {
+                        for (auto& group : *batch) {
+                            group_lambda(group);
+                        }
+                        delete batch;
+#pragma omp atomic update
+                        batches_outstanding--;
+                    }
+                }
+            }
+            else {
+                delete batch;
             }
         }
     }
