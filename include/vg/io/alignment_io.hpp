@@ -82,15 +82,6 @@ size_t gaf_unpaired_for_each_parallel(function<size_t(nid_t)> node_to_length, fu
 size_t gaf_unpaired_for_each_parallel(const HandleGraph& graph, const string& filename,
                                       function<void(Alignment&)> lambda,
                                       uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
-// Parallel GAF iteration that keeps each read's alignments (primary and its
-// secondaries, grouped by read name) together in one call to group_lambda.
-// See grouped_unpaired_for_each_parallel for the batching-boundary semantics.
-size_t gaf_grouped_unpaired_for_each_parallel(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const string& filename,
-                                              function<void(vector<Alignment>&)> group_lambda,
-                                              uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
-size_t gaf_grouped_unpaired_for_each_parallel(const HandleGraph& graph, const string& filename,
-                                              function<void(vector<Alignment>&)> group_lambda,
-                                              uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
 size_t gaf_paired_interleaved_for_each_parallel(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const string& filename,
                                                 function<void(Alignment&, Alignment&)> lambda,
                                                 uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);

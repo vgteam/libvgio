@@ -167,51 +167,6 @@ size_t gaf_unpaired_for_each_parallel(const HandleGraph& graph, const string& fi
     return gaf_unpaired_for_each_parallel(node_to_length, node_to_sequence, filename, lambda, batch_size);
 }
 
-size_t gaf_grouped_unpaired_for_each_parallel(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const string& filename,
-                                              function<void(vector<Alignment>&)> group_lambda,
-                                              uint64_t batch_size) {
-
-    htsFile* in = hts_open(filename.c_str(), "r");
-    if (in == NULL) {
-        cerr << "error: [vg::io::alignment_io.cpp] couldn't open " << filename << endl; exit(1);
-    }
-
-    kstring_t s_buffer = KS_INITIALIZE;
-
-    // Convert each GAF record to an Alignment as it is read.
-    function<bool(Alignment&)> get_read = [&](Alignment& aln) {
-        gafkluge::GafRecord gaf;
-        if (!get_next_record_from_gaf(node_to_length, node_to_sequence, in, s_buffer, gaf)) {
-            return false;
-        }
-        gaf_to_alignment(node_to_length, node_to_sequence, gaf, aln);
-        return true;
-    };
-
-    // Reads belong to the same group if they share a read name (a primary and
-    // its secondaries, as emitted consecutively by the aligners).
-    function<bool(const Alignment&, const Alignment&)> in_same_group = [](const Alignment& a, const Alignment& b) {
-        return a.name() == b.name();
-    };
-
-    size_t nLines = grouped_unpaired_for_each_parallel<Alignment>(get_read, group_lambda, in_same_group, batch_size);
-
-    hts_close(in);
-    return nLines;
-}
-
-size_t gaf_grouped_unpaired_for_each_parallel(const HandleGraph& graph, const string& filename,
-                                              function<void(vector<Alignment>&)> group_lambda,
-                                              uint64_t batch_size) {
-    function<size_t(nid_t)> node_to_length = [&graph](nid_t node_id) {
-        return graph.get_length(graph.get_handle(node_id));
-    };
-    function<string(nid_t, bool)> node_to_sequence = [&graph](nid_t node_id, bool is_reversed) {
-        return graph.get_sequence(graph.get_handle(node_id, is_reversed));
-    };
-    return gaf_grouped_unpaired_for_each_parallel(node_to_length, node_to_sequence, filename, group_lambda, batch_size);
-}
-
 size_t gaf_paired_interleaved_for_each_parallel(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const string& filename,
                                                 function<void(Alignment&, Alignment&)> lambda,
                                                 uint64_t batch_size) {
