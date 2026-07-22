@@ -388,6 +388,205 @@ void for_each_parallel(std::istream& in,
     for_each_parallel_impl(in, lambda2, lambda1, NO_WAIT, batch_size, progress);
 }
 
+template <typename T>
+size_t grouped_unpaired_for_each_parallel(std::istream& in,
+                                          const std::function<void(std::vector<T>&)>& group_lambda,
+                                          const std::function<bool(const T&, const T&)>& in_same_group,
+                                          uint64_t batch_size = 512) {
+    size_t nLines = 0;
+    std::vector<std::vector<T>>* batch = nullptr;
+    uint64_t batches_outstanding = 0;
+
+    ProtobufIterator<T> cursor(in);
+
+#pragma omp parallel default(none) shared(batches_outstanding, batch, nLines, cursor, group_lambda, in_same_group, batch_size)
+#pragma omp single
+    {
+        uint64_t max_batches_outstanding = batch_size;
+        const uint64_t max_max_batches_outstanding = 1 << 13;
+
+        T aln;
+        bool have_pending = cursor.has_current();
+        if (have_pending) {
+            aln = cursor.take();
+        }
+
+        while (have_pending) {
+            batch = new std::vector<std::vector<T>>();
+            uint64_t reads_in_batch = 0;
+
+            while (have_pending) {
+                batch->emplace_back();
+                std::vector<T>& group = batch->back();
+                group.emplace_back(std::move(aln));
+                nLines++;
+                reads_in_batch++;
+
+                have_pending = cursor.has_current();
+                if (have_pending) {
+                    aln = cursor.take();
+                }
+                while (have_pending && in_same_group(group.back(), aln)) {
+                    group.emplace_back(std::move(aln));
+                    nLines++;
+                    reads_in_batch++;
+                    have_pending = cursor.has_current();
+                    if (have_pending) {
+                        aln = cursor.take();
+                    }
+                }
+
+                if (reads_in_batch >= batch_size) {
+                    break;
+                }
+            }
+
+            if (!batch->empty()) {
+                uint64_t current_batches_outstanding;
+#pragma omp atomic capture
+                current_batches_outstanding = ++batches_outstanding;
+
+                if (current_batches_outstanding >= max_batches_outstanding) {
+                    for (auto& group : *batch) {
+                        group_lambda(group);
+                    }
+                    delete batch;
+#pragma omp atomic capture
+                    current_batches_outstanding = --batches_outstanding;
+
+                    if (4 * current_batches_outstanding / 3 < max_batches_outstanding
+                        && max_batches_outstanding < max_max_batches_outstanding) {
+                        max_batches_outstanding *= 2;
+                    }
+                } else {
+#pragma omp task default(none) firstprivate(batch) shared(batches_outstanding, group_lambda)
+                    {
+                        for (auto& group : *batch) {
+                            group_lambda(group);
+                        }
+                        delete batch;
+#pragma omp atomic update
+                        batches_outstanding--;
+                    }
+                }
+            } else {
+                delete batch;
+            }
+        }
+    }
+    return nLines;
+}
+
+template <typename T>
+size_t grouped_interleaved_for_each_parallel(
+    std::istream& in,
+    const std::function<void(std::vector<std::pair<T,T>>&)>& group_lambda,
+    const std::function<bool(const std::pair<T,T>&, const std::pair<T,T>&)>& in_same_group,
+    uint64_t batch_size = 512)
+{
+    using Pair = std::pair<T,T>;
+
+    size_t nLines = 0;
+    std::vector<std::vector<Pair>>* batch = nullptr;
+    uint64_t batches_outstanding = 0;
+
+    ProtobufIterator<T> cursor(in);
+
+#pragma omp parallel default(none) shared(batches_outstanding, batch, nLines, cursor, group_lambda, in_same_group, batch_size)
+#pragma omp single
+    {
+        uint64_t max_batches_outstanding = batch_size;
+        const uint64_t max_max_batches_outstanding = 1 << 13;
+
+        Pair aln_pair;
+        bool have_pending = cursor.has_current();
+        if (have_pending) {
+            aln_pair.first = cursor.take();
+            nLines++;
+            if (!cursor.has_current()) {
+                throw std::runtime_error("grouped_interleaved_for_each_parallel: stream has an odd number of records");
+            }
+            aln_pair.second = cursor.take();
+            nLines++;
+        }
+
+        while (have_pending) {
+            batch = new std::vector<std::vector<Pair>>();
+            uint64_t pairs_in_batch = 0;
+
+            while (have_pending) {
+                batch->emplace_back();
+                std::vector<Pair>& group = batch->back();
+                group.emplace_back(std::move(aln_pair));
+                pairs_in_batch++;
+
+                have_pending = cursor.has_current();
+                if (have_pending) {
+                    aln_pair.first = cursor.take();
+                    nLines++;
+                    if (!cursor.has_current()) {
+                        throw std::runtime_error("grouped_interleaved_for_each_parallel: stream has an odd number of records");
+                    }
+                    aln_pair.second = cursor.take();
+                    nLines++;
+                }
+
+                while (have_pending && in_same_group(group.back(), aln_pair)) {
+                    group.emplace_back(std::move(aln_pair));
+                    pairs_in_batch++;
+                    have_pending = cursor.has_current();
+                    if (have_pending) {
+                        aln_pair.first = cursor.take();
+                        nLines++;
+                        if (!cursor.has_current()) {
+                            throw std::runtime_error("grouped_interleaved_for_each_parallel: stream has an odd number of records");
+                        }
+                        aln_pair.second = cursor.take();
+                        nLines++;
+                    }
+                }
+
+                if (pairs_in_batch >= batch_size) {
+                    break;
+                }
+            }
+
+            if (!batch->empty()) {
+                uint64_t current_batches_outstanding;
+#pragma omp atomic capture
+                current_batches_outstanding = ++batches_outstanding;
+
+                if (current_batches_outstanding >= max_batches_outstanding) {
+                    for (auto& group : *batch) {
+                        group_lambda(group);
+                    }
+                    delete batch;
+#pragma omp atomic capture
+                    current_batches_outstanding = --batches_outstanding;
+
+                    if (4 * current_batches_outstanding / 3 < max_batches_outstanding
+                        && max_batches_outstanding < max_max_batches_outstanding) {
+                        max_batches_outstanding *= 2;
+                    }
+                } else {
+#pragma omp task default(none) firstprivate(batch) shared(batches_outstanding, group_lambda)
+                    {
+                        for (auto& group : *batch) {
+                            group_lambda(group);
+                        }
+                        delete batch;
+#pragma omp atomic update
+                        batches_outstanding--;
+                    }
+                }
+            } else {
+                delete batch;
+            }
+        }
+    }
+    return nLines;
+}
+
 }
 
 }
