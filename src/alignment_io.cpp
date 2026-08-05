@@ -975,7 +975,14 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
                 gaf.opt_fields["pd"] = make_pair("b", is_properly_paired ? "1" : "0");
             }
             if (annotation.fields().count("support")) {
+                // TODO: The "support" annotation in GAM indeed holds a string, which here we say must have been a number.
                 gaf.opt_fields["AD"] = make_pair("i", (annotation.fields().at("support")).string_value());
+            }
+            if (annotation.fields().count("left_tail_length")) {
+                gaf.opt_fields["lt"] = make_pair("i", std::to_string((long) annotation.fields().at("left_tail_length").number_value()));
+            }
+            if (annotation.fields().count("right_tail_length")) {
+                gaf.opt_fields["rt"] = make_pair("i", std::to_string((long) annotation.fields().at("right_tail_length").number_value()));
             }
         }
     }
@@ -1222,6 +1229,12 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length,
         } else if (opt_it.first == "cs" || opt_it.first == "cg") {
             // Skip cs and cg fields since we already read them.
             // So do nothing here.
+        } else if (opt_it.first == "lt" || opt_it.first == "rt") {
+            auto name = opt_it.first == "lt" ? "left_tail_length" : "right_tail_length";
+            auto* annotation = aln.mutable_annotation();
+            google::protobuf::Value tail_length;
+            tail_length.set_number_value(std::stol(opt_it.second.second));
+            (*annotation->mutable_fields())[name] = tail_length;
         } else {
             // Other optional fields need to go into the "tags" annotation,
             // tab-separated, as in SAM.
@@ -1231,6 +1244,7 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length,
             }
             // TODO: Deduplicate with serialization in gfakluge.hpp?
             extra_tags << opt_it.first << ":" << opt_it.second.first << ":" << opt_it.second.second;
+            // TODO: "support" was moved to "AD" on GAM->GAF conversion but doesn't get moved back here.
         }
     }
     if (extra_tags.tellp() != std::streampos(0)) {
