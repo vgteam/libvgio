@@ -1,6 +1,7 @@
 #include "vg/io/alignment_io.hpp"
 #include "vg/io/gafkluge.hpp"
 #include "vg/io/edit.hpp"
+#include "vg/io/protobuf_iterator.hpp"
 
 #include <sstream>
 #include <regex>
@@ -219,6 +220,80 @@ size_t gaf_paired_interleaved_for_each_parallel_after_wait(const HandleGraph& gr
     };
     return gaf_paired_interleaved_for_each_parallel_after_wait(node_to_length, node_to_sequence, filename, lambda, single_threaded_until_true, batch_size);
 }
+
+size_t gam_grouped_for_each_parallel(std::istream& in,
+                                     function<void(vector<Alignment>&)> lambda,
+                                     uint64_t batch_size) {
+
+    ProtobufIterator<Alignment> it(in);
+
+    function<bool(Alignment&)> get_record = [&](Alignment& aln) -> bool {
+        if (!it.has_current()) {
+            return false;
+        }
+        aln = it.take();
+        return true;
+    };
+    function<string(const Alignment&)> get_key = [](const Alignment& aln) {
+        return aln.name();
+    };
+
+    return grouped_for_each_parallel<Alignment>(get_record, get_key, lambda, batch_size);
+}
+
+
+size_t gaf_grouped_for_each_parallel(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const string& filename,
+                                     function<void(vector<Alignment>&)> lambda,
+                                     uint64_t batch_size) {
+
+    htsFile* in = hts_open(filename.c_str(), "r");
+    if (in == NULL) {
+        cerr << "error: [vg::io::alignment_io.cpp] couldn't open " << filename << endl; exit(1);
+    }
+
+    kstring_t s_buffer = KS_INITIALIZE;
+
+    // Only reads and parses the GAF line into a GafRecord (cheap: no CIGAR/cs
+    // decoding, no sequence reconstruction). The expensive gaf_to_alignment
+    // conversion happens per-group below, inside the dispatched task, so it
+    // stays parallelized across worker threads instead of running on the
+    // single fetch thread.
+    function<bool(gafkluge::GafRecord&)> get_record = [&](gafkluge::GafRecord& gaf) -> bool {
+        return get_next_record_from_gaf(node_to_length, node_to_sequence, in, s_buffer, gaf);
+    };
+    function<string(const gafkluge::GafRecord&)> get_key = [](const gafkluge::GafRecord& gaf) {
+        return gaf.query_name;
+    };
+    function<void(vector<gafkluge::GafRecord>&)> convert_and_call = [&](vector<gafkluge::GafRecord>& gaf_run) {
+        vector<Alignment> aln_run;
+        aln_run.reserve(gaf_run.size());
+        for (auto& gaf : gaf_run) {
+            Alignment aln;
+            gaf_to_alignment(node_to_length, node_to_sequence, gaf, aln);
+            aln_run.emplace_back(std::move(aln));
+        }
+        lambda(aln_run);
+    };
+
+    size_t nLines = grouped_for_each_parallel<gafkluge::GafRecord>(get_record, get_key, convert_and_call, batch_size);
+
+    hts_close(in);
+    return nLines;
+}
+
+
+size_t gaf_grouped_for_each_parallel(const HandleGraph& graph, const string& filename,
+                                     function<void(vector<Alignment>&)> lambda,
+                                     uint64_t batch_size) {
+    function<size_t(nid_t)> node_to_length = [&graph](nid_t node_id) {
+        return graph.get_length(graph.get_handle(node_id));
+    };
+    function<string(nid_t, bool)> node_to_sequence = [&graph](nid_t node_id, bool is_reversed) {
+        return graph.get_sequence(graph.get_handle(node_id, is_reversed));
+    };
+    return gaf_grouped_for_each_parallel(node_to_length, node_to_sequence, filename, lambda, batch_size);
+}
+
 
 string supplementary_tag_value(const Alignment& primary) {
     
