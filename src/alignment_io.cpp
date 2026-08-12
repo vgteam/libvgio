@@ -257,6 +257,7 @@ size_t gam_paired_grouped_for_each_parallel_after_wait(
 
     using AlignmentPair = pair<Alignment, Alignment>;
     ProtobufIterator<Alignment> it(in);
+    bool unmatched_record = false;
 
     function<bool(AlignmentPair&)> get_pair = [&](AlignmentPair& alignment_pair) {
         if (!it.has_current()) {
@@ -264,7 +265,8 @@ size_t gam_paired_grouped_for_each_parallel_after_wait(
         }
         Alignment first = it.take();
         if (!it.has_current()) {
-            throw runtime_error("interleaved GAM input contains an unmatched alignment");
+            unmatched_record = true;
+            return false;
         }
         Alignment second = it.take();
         alignment_pair = make_pair(std::move(first), std::move(second));
@@ -274,8 +276,12 @@ size_t gam_paired_grouped_for_each_parallel_after_wait(
         return fragment_key(alignment_pair.first.name(), alignment_pair.second.name());
     };
 
-    return grouped_for_each_parallel_after_wait<AlignmentPair>(
+    size_t count = grouped_for_each_parallel_after_wait<AlignmentPair>(
         get_pair, get_key, lambda, single_threaded_until_true, batch_size);
+    if (unmatched_record) {
+        throw runtime_error("interleaved GAM input contains an unmatched alignment");
+    }
+    return count;
 }
 
 
@@ -348,6 +354,7 @@ size_t gaf_paired_grouped_for_each_parallel_after_wait(
     }
 
     kstring_t s_buffer = KS_INITIALIZE;
+    bool unmatched_record = false;
     function<bool(GafPair&)> get_pair = [&](GafPair& gaf_pair) {
         gafkluge::GafRecord first;
         if (!get_next_record_from_gaf(node_to_length, node_to_sequence, in, s_buffer, first)) {
@@ -355,7 +362,8 @@ size_t gaf_paired_grouped_for_each_parallel_after_wait(
         }
         gafkluge::GafRecord second;
         if (!get_next_record_from_gaf(node_to_length, node_to_sequence, in, s_buffer, second)) {
-            throw runtime_error("interleaved GAF input contains an unmatched alignment");
+            unmatched_record = true;
+            return false;
         }
         gaf_pair = make_pair(std::move(first), std::move(second));
         return true;
@@ -379,6 +387,9 @@ size_t gaf_paired_grouped_for_each_parallel_after_wait(
     size_t count = grouped_for_each_parallel_after_wait<GafPair>(
         get_pair, get_key, convert_and_call, single_threaded_until_true, batch_size);
     hts_close(in);
+    if (unmatched_record) {
+        throw runtime_error("interleaved GAF input contains an unmatched alignment");
+    }
     return count;
 }
 
