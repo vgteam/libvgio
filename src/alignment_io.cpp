@@ -7,12 +7,20 @@
 #include <regex>
 #include <cmath>
 #include <string>
+#include <stdexcept>
 
 //#define debug_translation
 
 namespace vg {
 
 namespace io {
+
+static string fragment_key(const string& first_name, const string& second_name) {
+    if (first_name <= second_name) {
+        return first_name + '\n' + second_name;
+    }
+    return second_name + '\n' + first_name;
+}
 
 std::vector<std::string> read_gaf_header_lines(const std::string& filename) {
     std::vector<std::string> header_lines;
@@ -241,6 +249,35 @@ size_t gam_grouped_for_each_parallel(std::istream& in,
     return grouped_for_each_parallel<Alignment>(get_record, get_key, lambda, batch_size);
 }
 
+size_t gam_paired_grouped_for_each_parallel_after_wait(
+    istream& in,
+    function<void(vector<pair<Alignment, Alignment>>&)> lambda,
+    function<bool(void)> single_threaded_until_true,
+    uint64_t batch_size) {
+
+    using AlignmentPair = pair<Alignment, Alignment>;
+    ProtobufIterator<Alignment> it(in);
+
+    function<bool(AlignmentPair&)> get_pair = [&](AlignmentPair& alignment_pair) {
+        if (!it.has_current()) {
+            return false;
+        }
+        Alignment first = it.take();
+        if (!it.has_current()) {
+            throw runtime_error("interleaved GAM input contains an unmatched alignment");
+        }
+        Alignment second = it.take();
+        alignment_pair = make_pair(std::move(first), std::move(second));
+        return true;
+    };
+    function<string(const AlignmentPair&)> get_key = [](const AlignmentPair& alignment_pair) {
+        return fragment_key(alignment_pair.first.name(), alignment_pair.second.name());
+    };
+
+    return grouped_for_each_parallel_after_wait<AlignmentPair>(
+        get_pair, get_key, lambda, single_threaded_until_true, batch_size);
+}
+
 
 size_t gaf_grouped_for_each_parallel(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const string& filename,
                                      function<void(vector<Alignment>&)> lambda,
@@ -292,6 +329,75 @@ size_t gaf_grouped_for_each_parallel(const HandleGraph& graph, const string& fil
         return graph.get_sequence(graph.get_handle(node_id, is_reversed));
     };
     return gaf_grouped_for_each_parallel(node_to_length, node_to_sequence, filename, lambda, batch_size);
+}
+
+size_t gaf_paired_grouped_for_each_parallel_after_wait(
+    function<size_t(nid_t)> node_to_length,
+    function<string(nid_t, bool)> node_to_sequence,
+    const string& filename,
+    function<void(vector<pair<Alignment, Alignment>>&)> lambda,
+    function<bool(void)> single_threaded_until_true,
+    uint64_t batch_size) {
+
+    using GafPair = pair<gafkluge::GafRecord, gafkluge::GafRecord>;
+
+    htsFile* in = hts_open(filename.c_str(), "r");
+    if (in == nullptr) {
+        cerr << "error: [vg::io::alignment_io.cpp] couldn't open " << filename << endl;
+        exit(EXIT_FAILURE);
+    }
+
+    kstring_t s_buffer = KS_INITIALIZE;
+    function<bool(GafPair&)> get_pair = [&](GafPair& gaf_pair) {
+        gafkluge::GafRecord first;
+        if (!get_next_record_from_gaf(node_to_length, node_to_sequence, in, s_buffer, first)) {
+            return false;
+        }
+        gafkluge::GafRecord second;
+        if (!get_next_record_from_gaf(node_to_length, node_to_sequence, in, s_buffer, second)) {
+            throw runtime_error("interleaved GAF input contains an unmatched alignment");
+        }
+        gaf_pair = make_pair(std::move(first), std::move(second));
+        return true;
+    };
+    function<string(const GafPair&)> get_key = [](const GafPair& gaf_pair) {
+        return fragment_key(gaf_pair.first.query_name, gaf_pair.second.query_name);
+    };
+    function<void(vector<GafPair>&)> convert_and_call = [&](vector<GafPair>& gaf_pairs) {
+        vector<pair<Alignment, Alignment>> alignment_pairs;
+        alignment_pairs.reserve(gaf_pairs.size());
+        for (auto& gaf_pair : gaf_pairs) {
+            Alignment first;
+            Alignment second;
+            gaf_to_alignment(node_to_length, node_to_sequence, gaf_pair.first, first);
+            gaf_to_alignment(node_to_length, node_to_sequence, gaf_pair.second, second);
+            alignment_pairs.emplace_back(std::move(first), std::move(second));
+        }
+        lambda(alignment_pairs);
+    };
+
+    size_t count = grouped_for_each_parallel_after_wait<GafPair>(
+        get_pair, get_key, convert_and_call, single_threaded_until_true, batch_size);
+    hts_close(in);
+    return count;
+}
+
+size_t gaf_paired_grouped_for_each_parallel_after_wait(
+    const HandleGraph& graph,
+    const string& filename,
+    function<void(vector<pair<Alignment, Alignment>>&)> lambda,
+    function<bool(void)> single_threaded_until_true,
+    uint64_t batch_size) {
+
+    function<size_t(nid_t)> node_to_length = [&graph](nid_t node_id) {
+        return graph.get_length(graph.get_handle(node_id));
+    };
+    function<string(nid_t, bool)> node_to_sequence = [&graph](nid_t node_id, bool is_reversed) {
+        return graph.get_sequence(graph.get_handle(node_id, is_reversed));
+    };
+    return gaf_paired_grouped_for_each_parallel_after_wait(
+        node_to_length, node_to_sequence, filename, lambda,
+        single_threaded_until_true, batch_size);
 }
 
 
