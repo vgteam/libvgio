@@ -1,6 +1,7 @@
 #include "vg/io/alignment_io.hpp"
 #include "vg/io/gafkluge.hpp"
 #include "vg/io/edit.hpp"
+#include "vg/io/protobuf_iterator.hpp"
 
 #include <sstream>
 #include <regex>
@@ -12,6 +13,51 @@
 namespace vg {
 
 namespace io {
+
+bool decode_diploid_tag(Alignment& alignment, const string& name, char type, const string& value) {
+    if (name == "hp" && type == 'Z' && (value == "pri_hap" || value == "sec_hap")) {
+        (*alignment.mutable_annotation()->mutable_fields())["diploid_haplotype_preferred"].set_bool_value(value == "pri_hap");
+        return true;
+    }
+    if ((name == "hq" || name == "aq") && string("cCsSiI").find(type) != string::npos) {
+        // Parse without accepting trailing text, signs, fractions, or overflow.
+        unsigned quality = 0;
+        if (value.empty()) return false;
+        for (char digit : value) {
+            if (digit < '0' || digit > '9') return false;
+            quality = quality * 10 + digit - '0';
+            if (quality > 255) return false;
+        }
+        const char* annotation = name == "hq" ? "diploid_haplotype_quality" : "diploid_source_mapping_quality";
+        (*alignment.mutable_annotation()->mutable_fields())[annotation].set_number_value(quality);
+        return true;
+    }
+    return false;
+}
+
+vector<tuple<string, char, string>> encode_diploid_tags(const Alignment& alignment) {
+    vector<tuple<string, char, string>> tags;
+    const auto& fields = alignment.annotation().fields();
+    auto preferred = fields.find("diploid_haplotype_preferred");
+    if (preferred != fields.end()) {
+        if (preferred->second.kind_case() != google::protobuf::Value::kBoolValue) {
+            throw invalid_argument("diploid_haplotype_preferred must be boolean");
+        }
+        tags.emplace_back("hp", 'Z', preferred->second.bool_value() ? "pri_hap" : "sec_hap");
+    }
+    for (const auto& entry : {make_pair("hq", "diploid_haplotype_quality"),
+                              make_pair("aq", "diploid_source_mapping_quality")}) {
+        auto found = fields.find(entry.second);
+        if (found == fields.end()) continue;
+        double quality = found->second.number_value();
+        if (found->second.kind_case() != google::protobuf::Value::kNumberValue
+            || !isfinite(quality) || quality < 0 || quality > 255 || floor(quality) != quality) {
+            throw invalid_argument(string(entry.second) + " must be an integer within 0..255");
+        }
+        tags.emplace_back(entry.first, 'i', to_string(static_cast<int>(quality)));
+    }
+    return tags;
+}
 
 std::vector<std::string> read_gaf_header_lines(const std::string& filename) {
     std::vector<std::string> header_lines;
@@ -219,6 +265,81 @@ size_t gaf_paired_interleaved_for_each_parallel_after_wait(const HandleGraph& gr
     };
     return gaf_paired_interleaved_for_each_parallel_after_wait(node_to_length, node_to_sequence, filename, lambda, single_threaded_until_true, batch_size);
 }
+
+size_t gam_grouped_for_each_parallel(std::istream& in,
+                                     function<void(vector<Alignment>&)> lambda,
+                                     uint64_t batch_size) {
+
+    ProtobufIterator<Alignment> it(in);
+
+    function<bool(Alignment&)> get_record = [&](Alignment& aln) -> bool {
+        if (!it.has_current()) {
+            return false;
+        }
+        aln = it.take();
+        return true;
+    };
+    function<string(const Alignment&)> get_key = [](const Alignment& aln) {
+        return aln.name();
+    };
+
+    return grouped_for_each_parallel<Alignment>(get_record, get_key, lambda, batch_size);
+}
+
+
+size_t gaf_grouped_for_each_parallel(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const string& filename,
+                                     function<void(vector<Alignment>&)> lambda,
+                                     uint64_t batch_size) {
+
+    htsFile* in = hts_open(filename.c_str(), "r");
+    if (in == NULL) {
+        cerr << "error: [vg::io::alignment_io.cpp] couldn't open " << filename << endl; exit(1);
+    }
+
+    kstring_t s_buffer = KS_INITIALIZE;
+
+    // Only reads and parses the GAF line into a GafRecord (cheap: no CIGAR/cs
+    // decoding, no sequence reconstruction). The expensive gaf_to_alignment
+    // conversion happens per-group below, inside the dispatched task, so it
+    // stays parallelized across worker threads instead of running on the
+    // single fetch thread.
+    function<bool(gafkluge::GafRecord&)> get_record = [&](gafkluge::GafRecord& gaf) -> bool {
+        return get_next_record_from_gaf(node_to_length, node_to_sequence, in, s_buffer, gaf);
+    };
+    function<string(const gafkluge::GafRecord&)> get_key = [](const gafkluge::GafRecord& gaf) {
+        return gaf.query_name;
+    };
+    function<void(vector<gafkluge::GafRecord>&)> convert_and_call = [&](vector<gafkluge::GafRecord>& gaf_run) {
+        vector<Alignment> aln_run;
+        aln_run.reserve(gaf_run.size());
+        for (auto& gaf : gaf_run) {
+            Alignment aln;
+            gaf_to_alignment(node_to_length, node_to_sequence, gaf, aln);
+            aln_run.emplace_back(std::move(aln));
+        }
+        lambda(aln_run);
+    };
+
+    size_t nLines = grouped_for_each_parallel<gafkluge::GafRecord>(get_record, get_key, convert_and_call, batch_size);
+
+    free(s_buffer.s);
+    hts_close(in);
+    return nLines;
+}
+
+
+size_t gaf_grouped_for_each_parallel(const HandleGraph& graph, const string& filename,
+                                     function<void(vector<Alignment>&)> lambda,
+                                     uint64_t batch_size) {
+    function<size_t(nid_t)> node_to_length = [&graph](nid_t node_id) {
+        return graph.get_length(graph.get_handle(node_id));
+    };
+    function<string(nid_t, bool)> node_to_sequence = [&graph](nid_t node_id, bool is_reversed) {
+        return graph.get_sequence(graph.get_handle(node_id, is_reversed));
+    };
+    return gaf_grouped_for_each_parallel(node_to_length, node_to_sequence, filename, lambda, batch_size);
+}
+
 
 string supplementary_tag_value(const Alignment& primary) {
     
@@ -490,6 +611,12 @@ gafkluge::GafRecord alignment_to_gaf(function<size_t(nid_t)> node_to_length,
             gaf.opt_fields[tag.substr(0, 2)] = make_pair(tag.substr(3, 1), tag.substr(5, string::npos));
         }
     }
+    for (const auto& tag : encode_diploid_tags(aln)) {
+        gaf.opt_fields[get<0>(tag)] = make_pair(string(1, get<1>(tag)), get<2>(tag));
+    }
+    // GAF uses tp to distinguish primary and secondary source placements.
+    gaf.opt_fields["tp"] = make_pair("A", aln.is_secondary() ? "S" : "P");
+
     if (aln.supplementary_size() != 0) {
         // transfer supplementaries as a tag 'sa', which differs somewhat from the conventional SA tag for BAMs
         gaf.opt_fields["sa"] = make_pair(string("Z"), supplementary_tag_value(aln));
@@ -1125,7 +1252,12 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length,
 
     std::stringstream extra_tags;
     for (auto opt_it : gaf.opt_fields) {
-        if (opt_it.first == "dv") {
+        if (decode_diploid_tag(aln, opt_it.first, opt_it.second.first.front(), opt_it.second.second)) {
+            // Stored as typed annotations rather than duplicated in raw tags.
+        } else if (opt_it.first == "tp" && opt_it.second.first == "A"
+                   && (opt_it.second.second == "P" || opt_it.second.second == "S")) {
+            aln.set_is_secondary(opt_it.second.second == "S");
+        } else if (opt_it.first == "dv") {
             // get the identity from the dv divergence field
             // https://lh3.github.io/minimap2/minimap2.html#10
             aln.set_identity(1. - std::stof(opt_it.second.second));
