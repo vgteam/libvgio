@@ -160,6 +160,52 @@ void test_grouped_gaf_input() {
     std::cerr << "Grouped GAF adapter test passed." << std::endl;
 }
 
+void test_paired_grouped_input() {
+    const int previous_threads = omp_get_max_threads();
+    for (int threads : {1, 4}) {
+        omp_set_num_threads(threads);
+        for (bool empty : {false, true}) {
+            std::stringstream gam;
+            {
+                ProtobufEmitter<Alignment> emitter(gam);
+                if (!empty) {
+                    for (int i = 0; i < 33; ++i) {
+                        for (int score : {10, 20, 30}) {
+                            Alignment first, second;
+                            first.set_name(std::to_string(i) + "/1");
+                            second.set_name(std::to_string(i) + "/2");
+                            first.mutable_fragment_next()->set_name(second.name());
+                            second.mutable_fragment_prev()->set_name(first.name());
+                            first.set_score(score);
+                            second.set_score(score + 1);
+                            emitter.write(std::move(first));
+                            emitter.write(std::move(second));
+                        }
+                    }
+                }
+            }
+            std::mutex mutex;
+            size_t processed = 0;
+            bool ready = false;
+            auto collect = [&](std::vector<std::pair<Alignment, Alignment>>& group) {
+                std::lock_guard<std::mutex> lock(mutex);
+                require(group.size() == 3, "paired group was split across batches");
+                for (size_t i = 0; i < group.size(); ++i) {
+                    require(group[i].first.name() == group.front().first.name(), "fragment names mixed");
+                    require(group[i].first.score() == 10 * (i + 1), "pair order changed");
+                    require(group[i].second.score() == group[i].first.score() + 1, "mates mismatched");
+                }
+                ++processed;
+                if (!ready && processed == 3) ready = true;
+            };
+            auto count = gam_paired_grouped_for_each_parallel(gam, collect, [&] { return ready; }, 2);
+            require(count == (empty ? 0 : 33) && processed == count, "paired groups lost at EOF or warmup transition");
+        }
+    }
+    omp_set_num_threads(previous_threads);
+    std::cerr << "Paired grouped input tests passed." << std::endl;
+}
+
 void test_diploid_tags() {
     auto length = [](nid_t) -> size_t { return 4; };
     auto sequence = [](nid_t, bool) { return string("ACGT"); };
@@ -229,6 +275,7 @@ int main (int arcg, char** argv) {
     test_grouped_gam_input();
     test_grouped_gaf_input();
     omp_set_num_threads(previous_threads);
+    test_paired_grouped_input();
     test_diploid_tags();
 
     std::cerr << "Tests complete!" << std::endl;

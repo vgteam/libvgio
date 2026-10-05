@@ -341,6 +341,75 @@ size_t gaf_grouped_for_each_parallel(const HandleGraph& graph, const string& fil
 }
 
 
+// Length-prefix the first name so arbitrary read names cannot collide.
+static string paired_group_key(const string& first, const string& second) {
+    return to_string(first.size()) + ":" + first + second;
+}
+
+static void validate_grouped_pair(const Alignment& first, const Alignment& second) {
+    if (!first.has_fragment_next() || first.has_fragment_prev()
+        || !second.has_fragment_prev() || second.has_fragment_next()
+        || first.fragment_next().name() != second.name()
+        || second.fragment_prev().name() != first.name()) {
+        throw invalid_argument("grouped paired input requires reciprocal mate-1/mate-2 links: " + first.name());
+    }
+}
+
+size_t gam_paired_grouped_for_each_parallel(istream& in,
+    function<void(vector<pair<Alignment, Alignment>>&)> lambda,
+    function<bool()> single_threaded_until_true, uint64_t batch_size) {
+    ProtobufIterator<Alignment> it(in);
+    function<bool(pair<Alignment, Alignment>&)> next = [&](pair<Alignment, Alignment>& pair) {
+        if (!it.has_current()) return false;
+        pair.first = it.take();
+        if (!it.has_current()) throw invalid_argument("incomplete final pair in grouped GAM input");
+        pair.second = it.take();
+        return true;
+    };
+    auto key = [](const pair<Alignment, Alignment>& pair) {
+        return paired_group_key(pair.first.name(), pair.second.name());
+    };
+    auto process = [&](vector<pair<Alignment, Alignment>>& group) {
+        for (const auto& pair : group) validate_grouped_pair(pair.first, pair.second);
+        lambda(group);
+    };
+    return grouped_for_each_parallel<pair<Alignment, Alignment>>(next, key, process,
+                                                                 batch_size, single_threaded_until_true);
+}
+
+size_t gaf_paired_grouped_for_each_parallel(const HandleGraph& graph, const string& filename,
+    function<void(vector<pair<Alignment, Alignment>>&)> lambda,
+    function<bool()> single_threaded_until_true, uint64_t batch_size) {
+    unique_ptr<htsFile, decltype(&hts_close)> in(hts_open(filename.c_str(), "r"), hts_close);
+    if (!in) throw runtime_error("could not open " + filename);
+    kstring_t buffer = KS_INITIALIZE;
+    auto length = [&](nid_t id) { return graph.get_length(graph.get_handle(id)); };
+    auto sequence = [&](nid_t id, bool reverse) { return graph.get_sequence(graph.get_handle(id, reverse)); };
+    function<bool(pair<gafkluge::GafRecord, gafkluge::GafRecord>&)> next = [&](pair<gafkluge::GafRecord, gafkluge::GafRecord>& pair) {
+        if (!get_next_record_from_gaf(length, sequence, in.get(), buffer, pair.first)) return false;
+        if (!get_next_record_from_gaf(length, sequence, in.get(), buffer, pair.second)) {
+            throw invalid_argument("incomplete final pair in grouped GAF input");
+        }
+        return true;
+    };
+    auto key = [](const pair<gafkluge::GafRecord, gafkluge::GafRecord>& pair) {
+        return paired_group_key(pair.first.query_name, pair.second.query_name);
+    };
+    auto process = [&](vector<pair<gafkluge::GafRecord, gafkluge::GafRecord>>& group) {
+        vector<pair<Alignment, Alignment>> alignments(group.size());
+        for (size_t i = 0; i < group.size(); ++i) {
+            gaf_to_alignment(length, sequence, group[i].first, alignments[i].first);
+            gaf_to_alignment(length, sequence, group[i].second, alignments[i].second);
+            validate_grouped_pair(alignments[i].first, alignments[i].second);
+        }
+        lambda(alignments);
+    };
+    size_t count = grouped_for_each_parallel<pair<gafkluge::GafRecord, gafkluge::GafRecord>>(
+        next, key, process, batch_size, single_threaded_until_true);
+    free(buffer.s);
+    return count;
+}
+
 string supplementary_tag_value(const Alignment& primary) {
     
     stringstream strm;
