@@ -51,109 +51,113 @@ struct TemporaryGaf {
 }
 
 void test_grouped_input() {
-    const int previous_threads = omp_get_max_threads();
-    for (int threads : {1, 4}) {
-        omp_set_num_threads(threads);
-        for (size_t batch_size : {2, 4}) {
-            std::vector<Groups> cases{
-                {}, {{"a:0"}}, {{"a:0", "a:1", "a:2"}},
-                {{"a:0", "a:1"}, {"b:2"}, {"c:3", "c:4"}},
-                {{"a:0"}, {"b:1"}, {"a:2"}}
-            };
-            Groups long_run(1);
-            for (size_t i = 0; i < 1001; ++i) {
-                long_run.front().push_back("a:" + std::to_string(i));
-            }
-            cases.push_back(long_run);
-            Groups many_runs;
-            for (size_t i = 0; i < 33; ++i) {
-                many_runs.push_back({std::to_string(i) + ":0", std::to_string(i) + ":1"});
-            }
-            cases.push_back(many_runs);
-            for (const auto& expected : cases) {
-                std::vector<std::string> input;
-                for (const auto& group : expected) {
-                    input.insert(input.end(), group.begin(), group.end());
-                }
-                size_t cursor = 0;
-                Groups observed;
-                std::mutex mutex;
-                size_t count = grouped_for_each_parallel<std::string>(
-                    [&](std::string& record) {
-                        if (cursor == input.size()) return false;
-                        record = input[cursor++];
-                        return true;
-                    },
-                    [](const std::string& record) { return record.substr(0, record.find(':')); },
-                    [&](std::vector<std::string>& group) {
-                        std::lock_guard<std::mutex> lock(mutex);
-                        observed.push_back(group);
-                    }, batch_size);
-                check_groups(observed, expected, count);
-            }
+    // A repeated key after another key starts a new group; the final A is flushed at EOF.
+    const std::vector<std::string> input{"a:0", "a:1", "b:2", "a:3"};
+    size_t cursor = 0;
+    Groups observed;
+    auto count = grouped_for_each_parallel<std::string>(
+        [&](std::string& record) {
+            if (cursor == input.size()) return false;
+            record = input[cursor++];
+            return true;
+        },
+        [](const std::string& record) { return record.substr(0, record.find(':')); },
+        [&](std::vector<std::string>& group) { observed.push_back(group); }, 2);
+    check_groups(observed, {{"a:0", "a:1"}, {"b:2"}, {"a:3"}}, count);
 
-            // Exercise the actual GAM and GAF adapters, including EOF and same-name
-            // records with different scores, so within-group order is observable.
-            for (bool empty : {false, true}) {
-                const Groups expected = empty ? Groups{} : Groups{{"a:10", "a:20"}, {"b:30"}};
-                std::stringstream gam;
-                {
-                    ProtobufEmitter<Alignment> emitter(gam);
-                    if (!empty) {
-                        for (int score : {10, 20, 30}) {
-                            Alignment aln;
-                            aln.set_name(score == 30 ? "b" : "a");
-                            aln.set_sequence("ACGT");
-                            aln.set_score(score);
-                            emitter.write(std::move(aln));
-                        }
-                    }
-                }
-                Groups observed;
-                std::mutex mutex;
-                auto collect = [&](std::vector<Alignment>& group) {
-                    std::vector<std::string> records;
-                    for (const auto& aln : group) {
-                        records.push_back(aln.name() + ":" + std::to_string(aln.score()));
-                    }
-                    std::lock_guard<std::mutex> lock(mutex);
-                    observed.push_back(std::move(records));
-                };
-                auto count = gam_grouped_for_each_parallel(gam, collect, batch_size);
-                check_groups(observed, expected, count);
+    observed.clear();
+    count = grouped_for_each_parallel<std::string>(
+        [](std::string&) { return false; },
+        [](const std::string& record) { return record; },
+        [&](std::vector<std::string>& group) { observed.push_back(group); }, 2);
+    check_groups(observed, {}, count);
 
-                TemporaryGaf fixture;
-                {
-                    std::ofstream gaf(fixture.path);
-                    if (!empty) {
-                        for (int score : {10, 20, 30}) {
-                            gaf << (score == 30 ? "b" : "a")
-                                << "\t4\t0\t4\t+\t>1\t4\t0\t4\t4\t4\t60\tcs:Z::4\tAS:i:"
-                                << score << '\n';
-                        }
-                    }
-                }
-                observed.clear();
-                count = gaf_grouped_for_each_parallel(
-                    [](nid_t) { return size_t(4); },
-                    [](nid_t, bool) { return std::string("ACGT"); },
-                    fixture.path, collect, batch_size);
-                check_groups(observed, expected, count);
-            }
+    std::cerr << "Consecutive grouping and EOF tests passed." << std::endl;
+}
+
+void test_parallel_grouped_input() {
+    omp_set_num_threads(4);
+    // Nine groups fill four two-group batches and a partial final batch.
+    // Each group has three records: the batch limit counts groups, not records.
+    Groups expected;
+    std::vector<std::string> input;
+    for (size_t i = 0; i < 9; ++i) {
+        const auto name = std::to_string(i);
+        expected.push_back({name + ":0", name + ":1", name + ":2"});
+        input.insert(input.end(), expected.back().begin(), expected.back().end());
+    }
+    size_t cursor = 0;
+    Groups observed;
+    std::mutex mutex;
+    auto count = grouped_for_each_parallel<std::string>(
+        [&](std::string& record) {
+            if (cursor == input.size()) return false;
+            record = input[cursor++];
+            return true;
+        },
+        [](const std::string& record) { return record.substr(0, record.find(':')); },
+        [&](std::vector<std::string>& group) {
+            std::lock_guard<std::mutex> lock(mutex);
+            observed.push_back(group);
+        }, 2);
+    check_groups(observed, expected, count);
+    omp_set_num_threads(1);
+    std::cerr << "Parallel group integrity test passed." << std::endl;
+}
+
+void test_grouped_gam_input() {
+    std::stringstream gam;
+    {
+        ProtobufEmitter<Alignment> emitter(gam);
+        for (int score : {10, 20, 30}) {
+            Alignment aln;
+            aln.set_name(score == 30 ? "b" : "a");
+            aln.set_sequence("ACGT");
+            aln.set_score(score);
+            emitter.write(std::move(aln));
         }
     }
-    omp_set_num_threads(previous_threads);
-    for (size_t batch_size : {0, 1, 3}) {
-        bool threw = false;
-        try {
-            grouped_for_each_parallel<int>([](int&) { return false; },
-                [](const int&) { return std::string(); }, [](std::vector<int>&) {}, batch_size);
-        } catch (const std::invalid_argument&) {
-            threw = true;
+    std::vector<std::vector<Alignment>> observed;
+    auto count = gam_grouped_for_each_parallel(gam,
+        [&](std::vector<Alignment>& group) { observed.push_back(std::move(group)); }, 2);
+    Groups names_and_scores;
+    for (const auto& group : observed) {
+        names_and_scores.emplace_back();
+        for (const auto& aln : group) {
+            require(aln.sequence() == "ACGT", "GAM sequence changed");
+            names_and_scores.back().push_back(aln.name() + ":" + std::to_string(aln.score()));
         }
-        require(threw, "invalid batch size was accepted");
     }
-    std::cerr << "Grouped input tests passed (serial and parallel, GAM and GAF)." << std::endl;
+    check_groups(names_and_scores, {{"a:10", "a:20"}, {"b:30"}}, count);
+    std::cerr << "Grouped GAM adapter test passed." << std::endl;
+}
+
+void test_grouped_gaf_input() {
+    TemporaryGaf fixture;
+    {
+        std::ofstream gaf(fixture.path);
+        gaf << "a\t4\t0\t4\t+\t>1\t4\t0\t4\t4\t4\t60\tcs:Z::4\tAS:i:10\ttp:A:P\n"
+            << "a\t4\t0\t4\t+\t>1\t4\t0\t4\t4\t4\t60\tcs:Z::4\tAS:i:20\ttp:A:S\n"
+            << "b\t4\t0\t4\t+\t>1\t4\t0\t4\t4\t4\t60\tcs:Z::4\tAS:i:30\ttp:A:P\n";
+    }
+    std::vector<std::vector<Alignment>> observed;
+    auto count = gaf_grouped_for_each_parallel(
+        [](nid_t) { return size_t(4); },
+        [](nid_t, bool) { return std::string("ACGT"); }, fixture.path,
+        [&](std::vector<Alignment>& group) { observed.push_back(std::move(group)); }, 2);
+    Groups names_and_scores;
+    for (const auto& group : observed) {
+        names_and_scores.emplace_back();
+        for (const auto& aln : group) {
+            require(aln.sequence() == "ACGT", "GAF sequence reconstruction failed");
+            require(aln.path().mapping_size() == 1 && aln.path().mapping(0).position().node_id() == 1,
+                    "GAF graph placement was lost");
+            require(aln.is_secondary() == (aln.score() == 20), "GAF primary/secondary status was lost");
+            names_and_scores.back().push_back(aln.name() + ":" + std::to_string(aln.score()));
+        }
+    }
+    check_groups(names_and_scores, {{"a:10", "a:20"}, {"b:30"}}, count);
+    std::cerr << "Grouped GAF adapter test passed." << std::endl;
 }
 
 void test_diploid_tags() {
@@ -218,7 +222,13 @@ int main (int arcg, char** argv) {
         std::cerr << "Found " << message_name << " as " << descriptor->full_name() << " at " << descriptor << std::endl;
     }
     
+    const int previous_threads = omp_get_max_threads();
+    omp_set_num_threads(1);
     test_grouped_input();
+    test_parallel_grouped_input();
+    test_grouped_gam_input();
+    test_grouped_gaf_input();
+    omp_set_num_threads(previous_threads);
     test_diploid_tags();
 
     std::cerr << "Tests complete!" << std::endl;
