@@ -43,10 +43,14 @@ bool decode_diploid_tag(Alignment& alignment, const string& name, char type, con
 vector<tuple<string, char, string>> encode_diploid_tags(const Alignment& alignment);
 
 // general (implemented below)
+/// Process records in bounded batches. The optional predicate is checked serially
+/// before dispatching each batch. Callbacks remain serial until it returns true;
+/// it must then remain true and callbacks may run concurrently.
 template<typename T>
 size_t unpaired_for_each_parallel(function<bool(T&)> get_read_if_available,
                                   function<void(T&)> lambda,
-                                  uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+                                  uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE,
+                                  function<bool()> single_threaded_until_true = [] { return true; });
 
 template<typename T>
 size_t paired_for_each_parallel_after_wait(function<bool(T&, T&)> get_pair_if_available,
@@ -61,12 +65,14 @@ size_t paired_for_each_parallel_after_wait(function<bool(T&, T&)> get_pair_if_av
 /// The source and key callbacks are called serially. Memory includes complete
 /// pending groups, so a single large group is not bounded by batch_size.
 /// batch_size is a positive even number of groups per task, as required by the
-/// underlying unpaired iterator. Returns the number of groups processed.
+/// underlying unpaired iterator. Returns the number of groups processed. The
+/// optional serial-warmup predicate has the same contract as that iterator.
 template<typename T>
 size_t grouped_for_each_parallel(function<bool(T&)> get_record_if_available,
                                  function<string(const T&)> get_key,
                                  function<void(vector<T>&)> lambda,
-                                 uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+                                 uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE,
+                                 function<bool()> single_threaded_until_true = [] { return true; });
 
 // Opens an htsFile, reads GAF header lines, and closes the file.
 // Does nothing if the file refers to stdin ("-"), as we probably can't rewind it.
@@ -121,6 +127,22 @@ size_t gaf_grouped_for_each_parallel(const HandleGraph& graph, const string& fil
                                      function<void(vector<Alignment>&)> lambda,
                                      uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
 
+/// Group consecutive interleaved placement pairs by the ordered pair of read names.
+/// Each adjacent pair must be mate 1 then mate 2, with reciprocal fragment links.
+/// All alternatives of a fragment must be consecutive; repeated runs are not combined.
+/// Returns the number of fragments. An incomplete final pair is an error.
+/// Callbacks run serially until single_threaded_until_true returns true, then may
+/// run concurrently. Once true, the predicate must remain true. GAF conversion runs
+/// in worker tasks. batch_size counts groups, with the same contract as grouped input.
+size_t gam_paired_grouped_for_each_parallel(istream& in,
+    function<void(vector<pair<Alignment, Alignment>>&)> lambda,
+    function<bool()> single_threaded_until_true = [] { return true; },
+    uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+size_t gaf_paired_grouped_for_each_parallel(const HandleGraph& graph, const string& filename,
+    function<void(vector<pair<Alignment, Alignment>>&)> lambda,
+    function<bool()> single_threaded_until_true = [] { return true; },
+    uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+
 // gaf conversion
 
 /// Convert an alignment to GAF. The alignment must be in node ID space.
@@ -173,13 +195,13 @@ void alignment_quality_short_to_char(Alignment& alignment);
 template<typename T>
 inline size_t unpaired_for_each_parallel(function<bool(T&)> get_read_if_available,
                                          function<void(T&)> lambda,
-                                         uint64_t batch_size) {
+                                         uint64_t batch_size, function<bool()> single_threaded_until_true) {
     assert(batch_size % 2 == 0);    
     size_t nLines = 0;
     vector<T> *batch = nullptr;
     // number of batches currently being processed
     uint64_t batches_outstanding = 0;
-#pragma omp parallel default(none) shared(batches_outstanding, batch, nLines, get_read_if_available, lambda, batch_size)
+#pragma omp parallel default(none) shared(batches_outstanding, batch, nLines, get_read_if_available, lambda, batch_size, single_threaded_until_true)
 #pragma omp single
     {
         
@@ -220,7 +242,8 @@ inline size_t unpaired_for_each_parallel(function<bool(T&)> get_read_if_availabl
 #pragma omp atomic capture
                 current_batches_outstanding = ++batches_outstanding;
                 
-                if (current_batches_outstanding >= max_batches_outstanding) {
+                bool do_single_threaded = !single_threaded_until_true();
+                if (current_batches_outstanding >= max_batches_outstanding || do_single_threaded) {
                     // do this batch in the current thread because we've spawned the maximum number of
                     // concurrent batch tasks
                     for (auto& aln : *batch) {
@@ -231,7 +254,7 @@ inline size_t unpaired_for_each_parallel(function<bool(T&)> get_read_if_availabl
                     current_batches_outstanding = --batches_outstanding;
                     
                     if (4 * current_batches_outstanding / 3 < max_batches_outstanding
-                        && max_batches_outstanding < max_max_batches_outstanding) {
+                        && max_batches_outstanding < max_max_batches_outstanding && !do_single_threaded) {
                         // we went through at least 1/4 of the batch buffer while we were doing this thread's batch
                         // this looks risky, since we want the batch buffer to stay populated the entire time we're
                         // occupying this thread on compute, so let's increase the batch buffer size
@@ -355,7 +378,7 @@ template<typename T>
 inline size_t grouped_for_each_parallel(function<bool(T&)> get_record_if_available,
                                         function<string(const T&)> get_key,
                                         function<void(vector<T>&)> lambda,
-                                        uint64_t batch_size) {
+                                        uint64_t batch_size, function<bool()> single_threaded_until_true) {
 
     if (batch_size == 0 || batch_size % 2 != 0) {
         throw std::invalid_argument("grouped input requires a positive even batch size");
@@ -401,7 +424,7 @@ inline size_t grouped_for_each_parallel(function<bool(T&)> get_record_if_availab
         return false;
     };
 
-    return unpaired_for_each_parallel<vector<T>>(get_run_if_available, lambda, batch_size);
+    return unpaired_for_each_parallel<vector<T>>(get_run_if_available, lambda, batch_size, single_threaded_until_true);
 }
 
 }
