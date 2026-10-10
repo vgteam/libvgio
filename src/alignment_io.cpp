@@ -991,7 +991,7 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length,
         // Use the CS cigar string to add Edits into our Path, as well as set the sequence
         gafkluge::for_each_cigar(gaf, [&] (const char& cigar_cat, const size_t& cigar_len, const string& cigar_query, const string& cigar_target) {
                 assert(cur_offset < cur_len || ((cigar_cat == '+' || cigar_cat == 'I' || cigar_cat == 'S') && cur_offset <= cur_len));
-                if (!from_cg && cigar_cat != ':' && cigar_cat != '+' && cigar_cat != '-' && cigar_cat != '*') {
+                if (!from_cg && cigar_cat != ':' && cigar_cat != '+' && cigar_cat != '-' && cigar_cat != '*' && cigar_cat != '?' && cigar_cat != '!') {
                     from_cg = true;
                 }
 
@@ -1036,7 +1036,7 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length,
                         edit->set_sequence(string(cigar_len, 'N'));
                     }
                     sequence += edit->sequence();
-                } else if (cigar_cat == '-' || cigar_cat == 'D') {
+                } else if (cigar_cat == '-' || cigar_cat == '!' || cigar_cat == 'D') {
                     int64_t del_len = (int64_t)cigar_len;
                     while (del_len > 0) {
                         int64_t current_del = std::min(del_len, (int64_t)node_to_length(cur_position.node_id()) - cur_offset);
@@ -1054,9 +1054,10 @@ void gaf_to_alignment(function<size_t(nid_t)> node_to_length,
                             cur_len = node_to_length(cur_position.node_id());
                         }
                     }
-                } else if (cigar_cat == '*') {
+                } else if (cigar_cat == '*' || cigar_cat == '?') {
                     assert(cigar_len == 1);
-                    assert(!node_to_sequence || node_to_sequence(cur_position.node_id(), cur_position.is_reverse()).substr(cur_offset,1) == cigar_target);
+                    // We don't get the target base with a '?' operation.
+                    // assert(!node_to_sequence || node_to_sequence(cur_position.node_id(), cur_position.is_reverse()).substr(cur_offset,1) == cigar_target);
                     Edit* edit = aln.mutable_path()->mutable_mapping(cur_mapping)->add_edit();
                     // todo: support multibase snps
                     edit->set_from_length(cigar_len);
