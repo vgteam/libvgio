@@ -40,6 +40,16 @@ size_t paired_for_each_parallel_after_wait(function<bool(T&, T&)> get_pair_if_av
                                            function<bool(void)> single_threaded_until_true,
                                            uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
 
+/// Group consecutive records sharing the same key (produced by get_key) into "runs",
+/// processes each run with the provided lambda function
+/// batch_size, is the number of runs per dispatched task
+/// returns the no. of runs processed
+template<typename T>
+size_t grouped_for_each_parallel(function<bool(T&)> get_record_if_available,
+                                 function<string(const T&)> get_key,
+                                 function<void(vector<T>&)> lambda,
+                                 uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+
 // Opens an htsFile, reads GAF header lines, and closes the file.
 // Does nothing if the file refers to stdin ("-"), as we probably can't rewind it.
 // Returns the header lines without the trailing newline characters.
@@ -77,6 +87,20 @@ size_t gaf_paired_interleaved_for_each_parallel_after_wait(const HandleGraph& gr
                                                            function<void(Alignment&, Alignment&)> lambda,
                                                            function<bool(void)> single_threaded_until_true,
                                                            uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+
+// single
+// grouped (same read name) iteration, for callers that need all placements
+// of a read (e.g. primary + secondaries) delivered together
+size_t gam_grouped_for_each_parallel(std::istream& in,
+                                     function<void(vector<Alignment>&)> lambda,
+                                     uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+size_t gaf_grouped_for_each_parallel(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const string& filename,
+                                     function<void(vector<Alignment>&)> lambda,
+                                     uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+size_t gaf_grouped_for_each_parallel(const HandleGraph& graph, const string& filename,
+                                     function<void(vector<Alignment>&)> lambda,
+                                     uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+
 // gaf conversion
 
 /// Convert an alignment to GAF. The alignment must be in node ID space.
@@ -305,6 +329,55 @@ inline size_t paired_for_each_parallel_after_wait(function<bool(T&, T&)> get_pai
     }
     
     return nLines;
+}
+
+template<typename T>
+inline size_t grouped_for_each_parallel(function<bool(T&)> get_record_if_available,
+                                        function<string(const T&)> get_key,
+                                        function<void(vector<T>&)> lambda,
+                                        uint64_t batch_size) {
+
+    // State for the run currently being assembled from the record source.
+    // Only ever touched serially (from within unpaired_for_each_parallel's
+    // single-threaded batch-filling loop), so no synchronization is needed.
+    vector<T> current_run;
+    string current_key;
+    bool source_exhausted = false;
+
+    // Adapts the flat record source into a source of same-key runs, so grouped
+    // iteration can reuse unpaired_for_each_parallel's bounded task backpressure
+    function<bool(vector<T>&)> get_run_if_available = [&](vector<T>& out_run) -> bool {
+        if (source_exhausted && current_run.empty()) {
+            return false;
+        }
+        T record;
+        while (get_record_if_available(record)) {
+            string key = get_key(record);
+            if (current_run.empty()) {
+                current_key = key;
+                current_run.emplace_back(std::move(record));
+            } else if (key == current_key) {
+                current_run.emplace_back(std::move(record));
+            } else {
+                // Found the start of the next run: hand back the finished one
+                // and stash this record as the start of the next.
+                out_run = std::move(current_run);
+                current_run.clear();
+                current_key = key;
+                current_run.emplace_back(std::move(record));
+                return true;
+            }
+        }
+        source_exhausted = true;
+        if (!current_run.empty()) {
+            out_run = std::move(current_run);
+            current_run.clear();
+            return true;
+        }
+        return false;
+    };
+
+    return unpaired_for_each_parallel<vector<T>>(get_run_if_available, lambda, batch_size);
 }
 
 }
