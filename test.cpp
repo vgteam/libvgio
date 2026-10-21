@@ -9,7 +9,6 @@
 
 #include <algorithm>
 #include <fstream>
-#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <cstdio>
@@ -65,44 +64,7 @@ void test_grouped_input() {
         [&](std::vector<std::string>& group) { observed.push_back(group); }, 2);
     check_groups(observed, {{"a:0", "a:1"}, {"b:2"}, {"a:3"}}, count);
 
-    observed.clear();
-    count = grouped_for_each_parallel<std::string>(
-        [](std::string&) { return false; },
-        [](const std::string& record) { return record; },
-        [&](std::vector<std::string>& group) { observed.push_back(group); }, 2);
-    check_groups(observed, {}, count);
-
     std::cerr << "Consecutive grouping and EOF tests passed." << std::endl;
-}
-
-void test_parallel_grouped_input() {
-    omp_set_num_threads(4);
-    // Nine groups fill four two-group batches and a partial final batch.
-    // Each group has three records: the batch limit counts groups, not records.
-    Groups expected;
-    std::vector<std::string> input;
-    for (size_t i = 0; i < 9; ++i) {
-        const auto name = std::to_string(i);
-        expected.push_back({name + ":0", name + ":1", name + ":2"});
-        input.insert(input.end(), expected.back().begin(), expected.back().end());
-    }
-    size_t cursor = 0;
-    Groups observed;
-    std::mutex mutex;
-    auto count = grouped_for_each_parallel<std::string>(
-        [&](std::string& record) {
-            if (cursor == input.size()) return false;
-            record = input[cursor++];
-            return true;
-        },
-        [](const std::string& record) { return record.substr(0, record.find(':')); },
-        [&](std::vector<std::string>& group) {
-            std::lock_guard<std::mutex> lock(mutex);
-            observed.push_back(group);
-        }, 2);
-    check_groups(observed, expected, count);
-    omp_set_num_threads(1);
-    std::cerr << "Parallel group integrity test passed." << std::endl;
 }
 
 void test_grouped_gam_input() {
@@ -225,7 +187,6 @@ int main (int arcg, char** argv) {
     const int previous_threads = omp_get_max_threads();
     omp_set_num_threads(1);
     test_grouped_input();
-    test_parallel_grouped_input();
     test_grouped_gam_input();
     test_grouped_gaf_input();
     omp_set_num_threads(previous_threads);

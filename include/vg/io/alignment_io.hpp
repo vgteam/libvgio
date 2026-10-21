@@ -30,16 +30,13 @@ using namespace std;
 
 const uint64_t DEFAULT_PARALLEL_BATCHSIZE = 512;
 
-/// Decode hp:Z:pri_hap/sec_hap into diploid_haplotype_preferred (boolean),
-/// hq:i into diploid_haplotype_quality, and aq:i into diploid_source_mapping_quality.
-/// hp identifies the preferred target of a source placement, not a haplotype number.
-/// Qualities are numeric annotations; aq retains 255 for unavailable source MAPQ.
-/// Unrecognized
-/// values or types return false so callers can preserve them as ordinary tags.
+/// Decode a diploid annotation tag into the alignment's typed annotation fields.
+/// Return true if the tag was recognized and stored, false otherwise.
 bool decode_diploid_tag(Alignment& alignment, const string& name, char type, const string& value);
 
-/// Encode typed diploid annotations as SAM/GAF tags. These override raw tags of
-/// the same name. Numeric qualities must be integral and within 0..255.
+/// Convert typed diploid annotation fields in the alignment to (name, type, value)
+/// tag tuples suitable for SAM/GAF output. Throws invalid_argument if a field
+/// has an invalid type or value, including a non-integral or out-of-range quality.
 vector<tuple<string, char, string>> encode_diploid_tags(const Alignment& alignment);
 
 // general (implemented below)
@@ -54,14 +51,13 @@ size_t paired_for_each_parallel_after_wait(function<bool(T&, T&)> get_pair_if_av
                                            function<bool(void)> single_threaded_until_true,
                                            uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
 
-/// Process each maximal run of consecutive records with the same key as one group.
-/// Records retain their order within a group; callbacks may run concurrently and
-/// groups may finish out of input order. Repeated keys in separate runs are NOT
-/// combined. Callers needing all placements of a read must supply name-grouped input.
-/// The source and key callbacks are called serially. Memory includes complete
-/// pending groups, so a single large group is not bounded by batch_size.
-/// batch_size is a positive even number of groups per task, as required by the
-/// underlying unpaired iterator. Returns the number of groups processed.
+/// Process each run of consecutive records with the same key as one group.
+/// Records retain their order within a group; group callbacks may run concurrently
+/// and finish out of input order. Repeated keys in separate runs are not combined.
+/// Callers needing all placements of a read must supply name-grouped input.
+/// The source and key callbacks run serially. batch_size counts groups and must
+/// be positive and even; it does not limit the number of records in a group.
+/// Returns the number of groups processed.
 template<typename T>
 size_t grouped_for_each_parallel(function<bool(T&)> get_record_if_available,
                                  function<string(const T&)> get_key,
@@ -117,6 +113,7 @@ size_t gam_grouped_for_each_parallel(std::istream& in,
 size_t gaf_grouped_for_each_parallel(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const string& filename,
                                      function<void(vector<Alignment>&)> lambda,
                                      uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+/// Overload taking a HandleGraph directly instead of graph callbacks.
 size_t gaf_grouped_for_each_parallel(const HandleGraph& graph, const string& filename,
                                      function<void(vector<Alignment>&)> lambda,
                                      uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);

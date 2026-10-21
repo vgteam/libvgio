@@ -298,11 +298,9 @@ size_t gaf_grouped_for_each_parallel(function<size_t(nid_t)> node_to_length, fun
 
     kstring_t s_buffer = KS_INITIALIZE;
 
-    // Only reads and parses the GAF line into a GafRecord (cheap: no CIGAR/cs
-    // decoding, no sequence reconstruction). The expensive gaf_to_alignment
-    // conversion happens per-group below, inside the dispatched task, so it
-    // stays parallelized across worker threads instead of running on the
-    // single fetch thread.
+    // Parse the GAF line into a GafRecord here; the full gaf_to_alignment
+    // conversion happens per-group inside the dispatched task so it can run
+    // in parallel across worker threads.
     function<bool(gafkluge::GafRecord&)> get_record = [&](gafkluge::GafRecord& gaf) -> bool {
         return get_next_record_from_gaf(node_to_length, node_to_sequence, in, s_buffer, gaf);
     };
