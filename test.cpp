@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <cstdio>

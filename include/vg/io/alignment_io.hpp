@@ -40,9 +40,9 @@ bool decode_diploid_tag(Alignment& alignment, const string& name, char type, con
 vector<tuple<string, char, string>> encode_diploid_tags(const Alignment& alignment);
 
 // general (implemented below)
-/// Process records in bounded batches. The optional predicate is checked serially
-/// before dispatching each batch. Callbacks remain serial until it returns true;
-/// it must then remain true and callbacks may run concurrently.
+/// Process records in batches.
+/// Batches run one at a time until single_threaded_until_true returns true.
+/// After that, batches can run in parallel.
 template<typename T>
 size_t unpaired_for_each_parallel(function<bool(T&)> get_read_if_available,
                                   function<void(T&)> lambda,
@@ -62,7 +62,8 @@ size_t paired_for_each_parallel_after_wait(function<bool(T&, T&)> get_pair_if_av
 /// The source and key callbacks run serially. batch_size counts groups and must
 /// be positive and even; it does not limit the number of records in a group.
 /// Returns the number of groups processed.
-/// The optional serial-warmup predicate follows the contract of unpaired_for_each_parallel.
+/// Process groups serially until single_threaded_until_true returns true,
+/// then allow parallel processing.
 template<typename T>
 size_t grouped_for_each_parallel(function<bool(T&)> get_record_if_available,
                                  function<string(const T&)> get_key,
@@ -124,17 +125,23 @@ size_t gaf_grouped_for_each_parallel(const HandleGraph& graph, const string& fil
                                      function<void(vector<Alignment>&)> lambda,
                                      uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
 
-/// Group consecutive interleaved placement pairs by the ordered pair of read names.
-/// Each adjacent pair must be mate 1 then mate 2, with reciprocal fragment links.
-/// All alternatives of a fragment must be consecutive; repeated runs are not combined.
-/// Returns the number of fragments. An incomplete final pair is an error.
-/// Callbacks run serially until single_threaded_until_true returns true, then may
-/// run concurrently. Once true, the predicate must remain true. GAF conversion runs
-/// in worker tasks. batch_size counts groups, with the same contract as grouped input.
+/// Read paired-end alignments.
+/// Alignments for the same read pair are passed to lambda together.
+///
+/// Mate 1 must immediately precede mate 2, and they must link to each other.
+/// All alignments for a read pair must be next to each other in the file.
+/// An incomplete final pair is an error.
+///
+/// Returns the number of read-pair groups processed.
+/// Process groups serially until single_threaded_until_true returns true,
+/// then allow parallel processing.
+/// batch_size counts groups and follows grouped_for_each_parallel's requirements.
 size_t gam_paired_grouped_for_each_parallel(istream& in,
     function<void(vector<pair<Alignment, Alignment>>&)> lambda,
     function<bool()> single_threaded_until_true = [] { return true; },
     uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+/// Read paired-end GAF alignments using the same grouping and processing rules
+/// as gam_paired_grouped_for_each_parallel. Convert each group inside its processing task.
 size_t gaf_paired_grouped_for_each_parallel(const HandleGraph& graph, const string& filename,
     function<void(vector<pair<Alignment, Alignment>>&)> lambda,
     function<bool()> single_threaded_until_true = [] { return true; },
@@ -241,8 +248,8 @@ inline size_t unpaired_for_each_parallel(function<bool(T&)> get_read_if_availabl
                 
                 bool do_single_threaded = !single_threaded_until_true();
                 if (current_batches_outstanding >= max_batches_outstanding || do_single_threaded) {
-                    // do this batch in the current thread because we've spawned the maximum number of
-                    // concurrent batch tasks
+                    // Run this batch on this thread if single_threaded_until_true is still false
+                    // or too many tasks are already running.
                     for (auto& aln : *batch) {
                         lambda(aln);
                     }
@@ -250,6 +257,7 @@ inline size_t unpaired_for_each_parallel(function<bool(T&)> get_read_if_availabl
 #pragma omp atomic capture
                     current_batches_outstanding = --batches_outstanding;
                     
+                    // Don't grow the buffer while still running batches one at a time.
                     if (4 * current_batches_outstanding / 3 < max_batches_outstanding
                         && max_batches_outstanding < max_max_batches_outstanding && !do_single_threaded) {
                         // we went through at least 1/4 of the batch buffer while we were doing this thread's batch
