@@ -221,14 +221,14 @@ inline void parse_gaf_record(const std::string& gaf_line, GafRecord& gaf_record)
 
 /*
  * Visit each CS cigar record as a string.  CS cigars are described here: 
- * https://github.com/lh3/minimap2#the-cs-optional-tag
+ * https://github.com/vgteam/vg/blob/master/doc/static/GAF.md
  */
 inline void for_each_cs(const GafRecord& gaf_record, std::function<void(const std::string&)> fn) {
     if (gaf_record.opt_fields.count("cs")) {
         const std::string& cs_cigar = gaf_record.opt_fields.find("cs")->second.second;
         size_t next;
         for (size_t co = 0; co != std::string::npos; co = next) {
-            next = cs_cigar.find_first_of(":*-+", co + 1);
+            next = cs_cigar.find_first_of(":*-+?!", co + 1);
             fn(cs_cigar.substr(co, next == std::string::npos ? std::string::npos : next - co));
         }
     }
@@ -256,7 +256,7 @@ inline void for_each_cg(const GafRecord& gaf_record, std::function<void(const ch
 
 /*
  * Generic cigar function that will visit cs cigars if present, but fall back on cg cigars otherwise
- * Function takes in token {:*-+MIDNSHPX=}, length, query-string, target-string
+ * Function takes in token {:*?-!+MIDNSHPX=}, length, query-string, target-string
  * The latter two strings are only filled by cs records and will be left empty for cg
  */
 inline void for_each_cigar(const GafRecord& gaf_record, std::function<void(const char&, const size_t&, const std::string&, const std::string&)> fn) {
@@ -273,6 +273,11 @@ inline void for_each_cigar(const GafRecord& gaf_record, std::function<void(const
                 } else if (cs_str[0] == '*') {
                     assert(cs_str.length() == 3);
                     fn(cs_str[0], 1, cs_str.substr(2,1), cs_str.substr(1,1));
+                } else if (cs_str[0] == '?') {
+                    assert(cs_str.length() == 2);
+                    fn(cs_str[0], 1, cs_str.substr(1,1), "");
+                } else if (cs_str[0] == '!') {
+                    fn(cs_str[0], std::stol(cs_str.substr(1)), "", "");
                 } else {
                     assert(false);
                 }
