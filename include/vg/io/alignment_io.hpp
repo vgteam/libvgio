@@ -35,10 +35,35 @@ size_t unpaired_for_each_parallel(function<bool(T&)> get_read_if_available,
                                   uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
 
 template<typename T>
+size_t unpaired_for_each_parallel_after_wait(function<bool(T&)> get_read_if_available,
+                                             function<void(T&)> lambda,
+                                             function<bool(void)> single_threaded_until_true,
+                                             uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+
+template<typename T>
 size_t paired_for_each_parallel_after_wait(function<bool(T&, T&)> get_pair_if_available,
                                            function<void(T&, T&)> lambda,
                                            function<bool(void)> single_threaded_until_true,
                                            uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+
+/// Group consecutive records sharing the same key (produced by get_key) into "runs",
+/// processes each run with the provided lambda function
+/// batch_size, is the number of runs per dispatched task
+/// returns the no. of runs processed
+template<typename T>
+size_t grouped_for_each_parallel(function<bool(T&)> get_record_if_available,
+                                 function<string(const T&)> get_key,
+                                 function<void(vector<T>&)> lambda,
+                                 uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+
+/// Group consecutive records sharing the same key. Process groups serially
+/// until single_threaded_until_true returns true, and in parallel thereafter.
+template<typename T>
+size_t grouped_for_each_parallel_after_wait(function<bool(T&)> get_record_if_available,
+                                            function<string(const T&)> get_key,
+                                            function<void(vector<T>&)> lambda,
+                                            function<bool(void)> single_threaded_until_true,
+                                            uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
 
 // Opens an htsFile, reads GAF header lines, and closes the file.
 // Does nothing if the file refers to stdin ("-"), as we probably can't rewind it.
@@ -77,6 +102,46 @@ size_t gaf_paired_interleaved_for_each_parallel_after_wait(const HandleGraph& gr
                                                            function<void(Alignment&, Alignment&)> lambda,
                                                            function<bool(void)> single_threaded_until_true,
                                                            uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+
+// single
+// grouped (same read name) iteration, for callers that need all placements
+// of a read (e.g. primary + secondaries) delivered together
+size_t gam_grouped_for_each_parallel(std::istream& in,
+                                     function<void(vector<Alignment>&)> lambda,
+                                     uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+size_t gaf_grouped_for_each_parallel(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const string& filename,
+                                     function<void(vector<Alignment>&)> lambda,
+                                     uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+size_t gaf_grouped_for_each_parallel(const HandleGraph& graph, const string& filename,
+                                     function<void(vector<Alignment>&)> lambda,
+                                     uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+
+/// Read interleaved GAM pairs and group consecutive alternative placements
+/// belonging to the same fragment. Process groups serially until
+/// single_threaded_until_true returns true, and in parallel thereafter.
+size_t gam_paired_grouped_for_each_parallel_after_wait(
+    istream& in,
+    function<void(vector<pair<Alignment, Alignment>>&)> lambda,
+    function<bool(void)> single_threaded_until_true,
+    uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+
+/// GAF equivalent using explicit graph accessors.
+size_t gaf_paired_grouped_for_each_parallel_after_wait(
+    function<size_t(nid_t)> node_to_length,
+    function<string(nid_t, bool)> node_to_sequence,
+    const string& filename,
+    function<void(vector<pair<Alignment, Alignment>>&)> lambda,
+    function<bool(void)> single_threaded_until_true,
+    uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+
+/// GAF convenience overload using a HandleGraph.
+size_t gaf_paired_grouped_for_each_parallel_after_wait(
+    const HandleGraph& graph,
+    const string& filename,
+    function<void(vector<pair<Alignment, Alignment>>&)> lambda,
+    function<bool(void)> single_threaded_until_true,
+    uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+
 // gaf conversion
 
 /// Convert an alignment to GAF. The alignment must be in node ID space.
@@ -127,15 +192,16 @@ void alignment_quality_short_to_char(Alignment& alignment);
 
 // implementation
 template<typename T>
-inline size_t unpaired_for_each_parallel(function<bool(T&)> get_read_if_available,
-                                         function<void(T&)> lambda,
-                                         uint64_t batch_size) {
+inline size_t unpaired_for_each_parallel_after_wait(function<bool(T&)> get_read_if_available,
+                                                    function<void(T&)> lambda,
+                                                    function<bool(void)> single_threaded_until_true,
+                                                    uint64_t batch_size) {
     assert(batch_size % 2 == 0);    
     size_t nLines = 0;
     vector<T> *batch = nullptr;
     // number of batches currently being processed
     uint64_t batches_outstanding = 0;
-#pragma omp parallel default(none) shared(batches_outstanding, batch, nLines, get_read_if_available, lambda, batch_size)
+#pragma omp parallel default(none) shared(batches_outstanding, batch, nLines, get_read_if_available, lambda, single_threaded_until_true, batch_size)
 #pragma omp single
     {
         
@@ -175,8 +241,9 @@ inline size_t unpaired_for_each_parallel(function<bool(T&)> get_read_if_availabl
                 uint64_t current_batches_outstanding;
 #pragma omp atomic capture
                 current_batches_outstanding = ++batches_outstanding;
-                
-                if (current_batches_outstanding >= max_batches_outstanding) {
+
+                bool do_single_threaded = !single_threaded_until_true();
+                if (current_batches_outstanding >= max_batches_outstanding || do_single_threaded) {
                     // do this batch in the current thread because we've spawned the maximum number of
                     // concurrent batch tasks
                     for (auto& aln : *batch) {
@@ -187,7 +254,8 @@ inline size_t unpaired_for_each_parallel(function<bool(T&)> get_read_if_availabl
                     current_batches_outstanding = --batches_outstanding;
                     
                     if (4 * current_batches_outstanding / 3 < max_batches_outstanding
-                        && max_batches_outstanding < max_max_batches_outstanding) {
+                        && max_batches_outstanding < max_max_batches_outstanding
+                        && !do_single_threaded) {
                         // we went through at least 1/4 of the batch buffer while we were doing this thread's batch
                         // this looks risky, since we want the batch buffer to stay populated the entire time we're
                         // occupying this thread on compute, so let's increase the batch buffer size
@@ -211,6 +279,14 @@ inline size_t unpaired_for_each_parallel(function<bool(T&)> get_read_if_availabl
         }
     }
     return nLines;
+}
+
+template<typename T>
+inline size_t unpaired_for_each_parallel(function<bool(T&)> get_read_if_available,
+                                         function<void(T&)> lambda,
+                                         uint64_t batch_size) {
+    return unpaired_for_each_parallel_after_wait<T>(get_read_if_available, lambda,
+                                                    []() { return true; }, batch_size);
 }
 
 template<typename T>
@@ -305,6 +381,66 @@ inline size_t paired_for_each_parallel_after_wait(function<bool(T&, T&)> get_pai
     }
     
     return nLines;
+}
+
+template<typename T>
+inline size_t grouped_for_each_parallel_after_wait(function<bool(T&)> get_record_if_available,
+                                                   function<string(const T&)> get_key,
+                                                   function<void(vector<T>&)> lambda,
+                                                   function<bool(void)> single_threaded_until_true,
+                                                   uint64_t batch_size) {
+
+    // State for the run currently being assembled from the record source.
+    // Only ever touched serially (from within unpaired_for_each_parallel's
+    // single-threaded batch-filling loop), so no synchronization is needed.
+    vector<T> current_run;
+    string current_key;
+    bool source_exhausted = false;
+
+    // Adapts the flat record source into a source of same-key runs, so grouped
+    // iteration can reuse unpaired_for_each_parallel's bounded task backpressure
+    function<bool(vector<T>&)> get_run_if_available = [&](vector<T>& out_run) -> bool {
+        if (source_exhausted && current_run.empty()) {
+            return false;
+        }
+        T record;
+        while (get_record_if_available(record)) {
+            string key = get_key(record);
+            if (current_run.empty()) {
+                current_key = key;
+                current_run.emplace_back(std::move(record));
+            } else if (key == current_key) {
+                current_run.emplace_back(std::move(record));
+            } else {
+                // Found the start of the next run: hand back the finished one
+                // and stash this record as the start of the next.
+                out_run = std::move(current_run);
+                current_run.clear();
+                current_key = key;
+                current_run.emplace_back(std::move(record));
+                return true;
+            }
+        }
+        source_exhausted = true;
+        if (!current_run.empty()) {
+            out_run = std::move(current_run);
+            current_run.clear();
+            return true;
+        }
+        return false;
+    };
+
+    return unpaired_for_each_parallel_after_wait<vector<T>>(get_run_if_available, lambda,
+                                                            single_threaded_until_true, batch_size);
+}
+
+template<typename T>
+inline size_t grouped_for_each_parallel(function<bool(T&)> get_record_if_available,
+                                        function<string(const T&)> get_key,
+                                        function<void(vector<T>&)> lambda,
+                                        uint64_t batch_size) {
+    return grouped_for_each_parallel_after_wait<T>(get_record_if_available, get_key, lambda,
+                                                   []() { return true; }, batch_size);
 }
 
 }
