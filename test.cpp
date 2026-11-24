@@ -8,11 +8,8 @@
 #include "vg/io/protobuf_emitter.hpp"
 
 #include <algorithm>
-#include <fstream>
 #include <sstream>
 #include <stdexcept>
-#include <cstdio>
-#include <unistd.h>
 #include <omp.h>
 
 namespace {
@@ -34,19 +31,6 @@ void check_groups(Groups observed, Groups expected, size_t count) {
     require(observed == expected, "groups lost, split, combined, or reordered records");
 }
 
-struct TemporaryGaf {
-    std::string path;
-    TemporaryGaf() {
-        char pattern[] = "/tmp/libvgio-grouped-XXXXXX";
-        int fd = mkstemp(pattern);
-        if (fd < 0) {
-            throw std::runtime_error("could not create GAF fixture");
-        }
-        close(fd);
-        path = pattern;
-    }
-    ~TemporaryGaf() { std::remove(path.c_str()); }
-};
 }
 
 void test_grouped_input() {
@@ -95,17 +79,13 @@ void test_grouped_gam_input() {
 }
 
 void test_grouped_gaf_input() {
-    TemporaryGaf fixture;
-    {
-        std::ofstream gaf(fixture.path);
-        gaf << "a\t4\t0\t4\t+\t>1\t4\t0\t4\t4\t4\t60\tcs:Z::4\tAS:i:10\ttp:A:P\n"
-            << "a\t4\t0\t4\t+\t>1\t4\t0\t4\t4\t4\t60\tcs:Z::4\tAS:i:20\ttp:A:S\n"
-            << "b\t4\t0\t4\t+\t>1\t4\t0\t4\t4\t4\t60\tcs:Z::4\tAS:i:30\ttp:A:P\n";
-    }
+    // Two placements of read a followed by one placement of read b.
+    std::string filename = LIBVGIO_TEST_DATA_DIR "/grouped.gaf";
+
     std::vector<std::vector<Alignment>> observed;
     auto count = gaf_grouped_for_each_parallel(
         [](nid_t) { return size_t(4); },
-        [](nid_t, bool) { return std::string("ACGT"); }, fixture.path,
+        [](nid_t, bool) { return std::string("ACGT"); }, filename,
         [&](std::vector<Alignment>& group) { observed.push_back(std::move(group)); }, 2);
     Groups names_and_scores;
     for (const auto& group : observed) {
