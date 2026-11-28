@@ -3,6 +3,8 @@
 
 #include <iostream>
 #include <functional>
+#include <tuple>
+#include <stdexcept>
 #include <zlib.h>
 #include "vg/vg.pb.h"
 #include <htslib/hfile.h>
@@ -28,6 +30,15 @@ using namespace std;
 
 const uint64_t DEFAULT_PARALLEL_BATCHSIZE = 512;
 
+/// Decode a diploid annotation tag into the alignment's typed annotation fields.
+/// Return true if the tag was recognized and stored, false otherwise.
+bool decode_diploid_tag(Alignment& alignment, const string& name, char type, const string& value);
+
+/// Convert typed diploid annotation fields in the alignment to (name, type, value)
+/// tag tuples suitable for SAM/GAF output. Throws invalid_argument if a field
+/// has an invalid type or value, including a non-integral or out-of-range quality.
+vector<tuple<string, char, string>> encode_diploid_tags(const Alignment& alignment);
+
 // general (implemented below)
 template<typename T>
 size_t unpaired_for_each_parallel(function<bool(T&)> get_read_if_available,
@@ -39,6 +50,19 @@ size_t paired_for_each_parallel_after_wait(function<bool(T&, T&)> get_pair_if_av
                                            function<void(T&, T&)> lambda,
                                            function<bool(void)> single_threaded_until_true,
                                            uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+
+/// Process each run of consecutive records with the same key as one group.
+/// Records retain their order within a group; group callbacks may run concurrently
+/// and finish out of input order. Repeated keys in separate runs are not combined.
+/// Callers needing all placements of a read must supply name-grouped input.
+/// The source and key callbacks run serially. batch_size counts groups and must
+/// be positive and even; it does not limit the number of records in a group.
+/// Returns the number of groups processed.
+template<typename T>
+size_t grouped_for_each_parallel(function<bool(T&)> get_record_if_available,
+                                 function<string(const T&)> get_key,
+                                 function<void(vector<T>&)> lambda,
+                                 uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
 
 // Opens an htsFile, reads GAF header lines, and closes the file.
 // Does nothing if the file refers to stdin ("-"), as we probably can't rewind it.
@@ -77,6 +101,23 @@ size_t gaf_paired_interleaved_for_each_parallel_after_wait(const HandleGraph& gr
                                                            function<void(Alignment&, Alignment&)> lambda,
                                                            function<bool(void)> single_threaded_until_true,
                                                            uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+
+/// Process consecutive same-name GAM records together, preserving within-group order.
+/// Input must be grouped by read name; separate runs of a name are not combined.
+/// Returns the number of groups. See grouped_for_each_parallel for threading and batching.
+size_t gam_grouped_for_each_parallel(std::istream& in,
+                                     function<void(vector<Alignment>&)> lambda,
+                                     uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+/// Process consecutive same-name GAF records together; conversion runs in worker tasks.
+/// Has the same ordering, batching, and group-count contract as the GAM reader.
+size_t gaf_grouped_for_each_parallel(function<size_t(nid_t)> node_to_length, function<string(nid_t, bool)> node_to_sequence, const string& filename,
+                                     function<void(vector<Alignment>&)> lambda,
+                                     uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+/// Overload taking a HandleGraph directly instead of graph callbacks.
+size_t gaf_grouped_for_each_parallel(const HandleGraph& graph, const string& filename,
+                                     function<void(vector<Alignment>&)> lambda,
+                                     uint64_t batch_size = DEFAULT_PARALLEL_BATCHSIZE);
+
 // gaf conversion
 
 /// Convert an alignment to GAF. The alignment must be in node ID space.
@@ -305,6 +346,59 @@ inline size_t paired_for_each_parallel_after_wait(function<bool(T&, T&)> get_pai
     }
     
     return nLines;
+}
+
+template<typename T>
+inline size_t grouped_for_each_parallel(function<bool(T&)> get_record_if_available,
+                                        function<string(const T&)> get_key,
+                                        function<void(vector<T>&)> lambda,
+                                        uint64_t batch_size) {
+
+    if (batch_size == 0 || batch_size % 2 != 0) {
+        throw std::invalid_argument("grouped input requires a positive even batch size");
+    }
+
+    // State for the run currently being assembled from the record source.
+    // Only ever touched serially (from within unpaired_for_each_parallel's
+    // single-threaded batch-filling loop), so no synchronization is needed.
+    vector<T> current_run;
+    string current_key;
+    bool source_exhausted = false;
+
+    // Adapts the flat record source into a source of same-key runs, so grouped
+    // iteration can reuse unpaired_for_each_parallel's bounded task backpressure
+    function<bool(vector<T>&)> get_run_if_available = [&](vector<T>& out_run) -> bool {
+        if (source_exhausted && current_run.empty()) {
+            return false;
+        }
+        T record;
+        while (get_record_if_available(record)) {
+            string key = get_key(record);
+            if (current_run.empty()) {
+                current_key = key;
+                current_run.emplace_back(std::move(record));
+            } else if (key == current_key) {
+                current_run.emplace_back(std::move(record));
+            } else {
+                // Found the start of the next run: hand back the finished one
+                // and stash this record as the start of the next.
+                out_run = std::move(current_run);
+                current_run.clear();
+                current_key = key;
+                current_run.emplace_back(std::move(record));
+                return true;
+            }
+        }
+        source_exhausted = true;
+        if (!current_run.empty()) {
+            out_run = std::move(current_run);
+            current_run.clear();
+            return true;
+        }
+        return false;
+    };
+
+    return unpaired_for_each_parallel<vector<T>>(get_run_if_available, lambda, batch_size);
 }
 
 }
