@@ -8,6 +8,9 @@
 #include "vg/io/protobuf_emitter.hpp"
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
+#include <unistd.h>
 #include <sstream>
 #include <stdexcept>
 #include <omp.h>
@@ -80,13 +83,46 @@ void test_grouped_gam_input() {
 
 void test_grouped_gaf_input() {
     // Two placements of read a followed by one placement of read b.
-    std::string filename = LIBVGIO_TEST_DATA_DIR "/grouped.gaf";
+    const char* gaf = R"(a	4	0	4	+	>1	4	0	4	4	4	60	cs:Z::4	AS:i:10	tp:A:P
+a	4	0	4	+	>1	4	0	4	4	4	60	cs:Z::4	AS:i:20	tp:A:S
+b	4	0	4	+	>1	4	0	4	4	4	60	cs:Z::4	AS:i:30	tp:A:P
+)";
+    const char* temporary_directory = std::getenv("TMPDIR");
+    std::string pattern =
+        temporary_directory != nullptr && temporary_directory[0] != '\0'
+            ? temporary_directory
+            : ".";
+    pattern += "/libvgio-grouped-XXXXXX";
+    std::vector<char> filename(pattern.begin(), pattern.end());
+    filename.push_back('\0');
+
+    int fd = mkstemp(filename.data());
+    require(fd != -1, "could not create temporary GAF file");
+    FILE* file = fdopen(fd, "w");
+    if (file == nullptr) {
+        close(fd);
+        std::remove(filename.data());
+        throw std::runtime_error("could not open temporary GAF file");
+    }
+    bool written = std::fputs(gaf, file) >= 0;
+    bool closed = std::fclose(file) == 0;
+    if (!written || !closed) {
+        std::remove(filename.data());
+        throw std::runtime_error("could not write temporary GAF file");
+    }
 
     std::vector<std::vector<Alignment>> observed;
-    auto count = gaf_grouped_for_each_parallel(
-        [](nid_t) { return size_t(4); },
-        [](nid_t, bool) { return std::string("ACGT"); }, filename,
-        [&](std::vector<Alignment>& group) { observed.push_back(std::move(group)); }, 2);
+    size_t count;
+    try {
+        count = gaf_grouped_for_each_parallel(
+            [](nid_t) { return size_t(4); },
+            [](nid_t, bool) { return std::string("ACGT"); }, filename.data(),
+            [&](std::vector<Alignment>& group) { observed.push_back(std::move(group)); }, 2);
+    } catch (...) {
+        std::remove(filename.data());
+        throw;
+    }
+    std::remove(filename.data());
     Groups names_and_scores;
     for (const auto& group : observed) {
         names_and_scores.emplace_back();
@@ -129,7 +165,7 @@ void test_diploid_tags() {
         }
     }
     Alignment alignment;
-    for (const string& value : {"", "-1", "256", "1.5", "60junk", "999999999999999999999"}) {
+    for (const string& value : {"", "-1", "+1", " 1", "1 ", "256", "1.5", "60junk", "999999999999999999999"}) {
         require(!decode_diploid_tag(alignment, "aq", 'i', value), "invalid quality accepted");
     }
     require(!decode_diploid_tag(alignment, "hp", 'i', "1"), "unrelated hp type consumed");
@@ -164,6 +200,8 @@ int main (int arcg, char** argv) {
         std::cerr << "Found " << message_name << " as " << descriptor->full_name() << " at " << descriptor << std::endl;
     }
     
+    // These tests check grouping rather than concurrency. Run with one thread
+    // because their callbacks append to shared vectors without locking.
     const int previous_threads = omp_get_max_threads();
     omp_set_num_threads(1);
     test_grouped_input();

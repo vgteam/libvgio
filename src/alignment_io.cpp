@@ -7,6 +7,7 @@
 #include <regex>
 #include <cmath>
 #include <string>
+#include <stdexcept>
 
 //#define debug_translation
 
@@ -20,13 +21,21 @@ bool decode_diploid_tag(Alignment& alignment, const string& name, char type, con
         return true;
     }
     if ((name == "hq" || name == "aq") && string("cCsSiI").find(type) != string::npos) {
-        // Parse without accepting trailing text, signs, fractions, or overflow.
-        unsigned quality = 0;
-        if (value.empty()) return false;
-        for (char digit : value) {
-            if (digit < '0' || digit > '9') return false;
-            quality = quality * 10 + digit - '0';
-            if (quality > 255) return false;
+        // Reject signs and leading whitespace before parsing the integer.
+        if (value.empty() || value.front() < '0' || value.front() > '9') {
+            return false;
+        }
+        unsigned long quality;
+        try {
+            size_t parsed = 0;
+            quality = std::stoul(value, &parsed);
+            if (parsed != value.size() || quality > 255) {
+                return false;
+            }
+        } catch (const std::invalid_argument&) {
+            return false;
+        } catch (const std::out_of_range&) {
+            return false;
         }
         const char* annotation = name == "hq" ? "diploid_haplotype_quality" : "diploid_source_mapping_quality";
         (*alignment.mutable_annotation()->mutable_fields())[annotation].set_number_value(quality);
